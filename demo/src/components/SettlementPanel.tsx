@@ -75,7 +75,7 @@ export function SettlementPanel() {
     <div className="mt-6 rounded-xl border border-line bg-panel p-4">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">Prediction market · settlement</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">TornaLine · prediction market settlement</div>
           <div className="mt-1 text-base font-semibold tracking-tight">
             YES = <span className="text-brand">{pred.label}</span>
             <span className="ml-2 text-xs font-normal text-faint">fixture {pred.fixtureId} · payout {pred.payout} quote/share</span>
