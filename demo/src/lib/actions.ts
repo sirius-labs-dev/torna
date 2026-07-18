@@ -4,11 +4,14 @@
 // (adapter sendTransaction) or a pre-funded demo identity (local Keypair). Each builds an
 // instruction via the orderbook client, signs, sends + confirms, and returns the tx signature.
 import "./polyfill";
-import { Keypair, PublicKey, Transaction, sendAndConfirmTransaction, type Connection } from "@solana/web3.js";
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { Keypair, PublicKey, Transaction, ComputeBudgetProgram, sendAndConfirmTransaction, type Connection } from "@solana/web3.js";
+import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction } from "@solana/spl-token";
 import { keys } from "torna-sdk";
-import { ASK, cancelIx, matchIx, placeIx, placeColdIx, type Side } from "./orderbook";
-import { MARKET, askTree, bidTree, connection, marketId, orderbookProgram, reader, tornaProgram } from "./market";
+import {
+  ASK, cancelIx, matchIx, placeIx, placeColdIx, mintSetIx, resolveIx, redeemIx,
+  buildValidateStatPayload, readResolution, type Side,
+} from "./orderbook";
+import { MARKET, askTree, bidTree, connection, marketId, orderbookProgram, prediction, reader, tornaProgram } from "./market";
 
 const N_KEY_COUNT = 2;
 const rdU16 = (d: Uint8Array, o: number) => new DataView(d.buffer, d.byteOffset, d.byteLength).getUint16(o, true);
@@ -119,4 +122,67 @@ export async function requestFaucet(pubkey: PublicKey): Promise<{ sig?: string; 
   const j = await res.json();
   if (!res.ok) throw new Error(j.error ?? "faucet failed");
   return j;
+}
+
+// ---- prediction-market settlement actions ----
+
+const ataIx = (mint: PublicKey, owner: PublicKey, payer: PublicKey) =>
+  createAssociatedTokenAccountIdempotentInstruction(payer, getAssociatedTokenAddressSync(mint, owner, true), owner, mint);
+
+/** MintSet: deposit `amount * payout` quote collateral -> receive `amount` YES + `amount` NO. Creates
+ *  the caller's YES/NO ATAs idempotently so a fresh wallet works first try. */
+export async function mintSet(actor: Actor, amount: bigint): Promise<string> {
+  const p = prediction();
+  const baseMint = new PublicKey(MARKET.baseMint);
+  const noMint = new PublicKey(p.noMint);
+  const quoteMint = new PublicKey(MARKET.quoteMint);
+  const tx = new Transaction()
+    .add(ataIx(baseMint, actor.publicKey, actor.publicKey))
+    .add(ataIx(noMint, actor.publicKey, actor.publicKey))
+    .add(mintSetIx({
+      orderbook: orderbookProgram(), marketId: marketId(), user: actor.publicKey, amount,
+      baseMint, noMint, quoteMint, quoteVault: new PublicKey(MARKET.quoteVault),
+    }));
+  return actor.send(tx);
+}
+
+/** Resolve: pull the finalised v3 multiproof from the relayer, build the borsh payload, and settle
+ *  on-chain via the txoracle CPI. Trustless — the oracle checks the proof against its own root and
+ *  evaluates the market's stored predicate. Safe to expose to any caller. */
+export async function resolve(actor: Actor): Promise<{ sig: string }> {
+  const p = prediction();
+  const keys = p.statKeys.join(",");
+  const r = await fetch(`/api/txline/scores/${p.fixtureId}?proof=1&statKeys=${keys}`);
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.error ?? "proof fetch failed");
+  if (!j.finished) throw new Error("match is not finalised yet — cannot resolve");
+  if (!j.val) throw new Error("missing multiproof in relayer response");
+  const { payload, epochDay } = buildValidateStatPayload(j.val);
+  const ix = resolveIx({
+    orderbook: orderbookProgram(), marketId: marketId(), caller: actor.publicKey,
+    oracleProgram: new PublicKey(p.oracleProgram), payload, epochDay,
+  });
+  // validate_stat_v3 is compute-heavy — raise the CU limit before the CPI.
+  const tx = new Transaction()
+    .add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }))
+    .add(ix);
+  const sig = await actor.send(tx);
+  return { sig };
+}
+
+/** Redeem: after Resolve, burn `amount` winning shares for `amount * payout` quote. Reads the on-chain
+ *  resolution to pick the winning mint, so the caller never has to know which side won. */
+export async function redeem(actor: Actor, amount: bigint): Promise<string> {
+  const p = prediction();
+  const res = await readResolution(reader(), orderbookProgram(), marketId());
+  if (!res || !res.resolved) throw new Error("market is not resolved yet");
+  const winningMint = new PublicKey(res.yesWon ? MARKET.baseMint : p.noMint);
+  const quoteMint = new PublicKey(MARKET.quoteMint);
+  const tx = new Transaction()
+    .add(ataIx(quoteMint, actor.publicKey, actor.publicKey))
+    .add(redeemIx({
+      orderbook: orderbookProgram(), marketId: marketId(), holder: actor.publicKey, amount,
+      winningMint, quoteMint, quoteVault: new PublicKey(MARKET.quoteVault),
+    }));
+  return actor.send(tx);
 }

@@ -1,5 +1,7 @@
 import { Terminal } from "@/components/Terminal";
 import { DevX } from "@/components/DevX";
+import { SettlementPanel } from "@/components/SettlementPanel";
+import { isPredictionMarket } from "@/lib/market";
 
 export default function TradePage() {
   return (
@@ -16,6 +18,8 @@ export default function TradePage() {
       </div>
 
       <Terminal />
+
+      {isPredictionMarket() && <SettlementPanel />}
 
       <div className="mt-12">
         <DevX />
