@@ -27,9 +27,9 @@ import {
 const RPC = process.env.RPC ?? "https://api.devnet.solana.com";
 const VS = 8 + 32; // 40: maker(32) + size_be(8)
 const F = 8;
-const MARKET_ID = 2n; // distinct from the plain CLOB demo (market 1)
-const ASK_TREE = 3;
-const BID_TREE = 4;
+const MARKET_ID = 3n; // distinct from the plain CLOB demo (market 1)
+const ASK_TREE = 5;
+const BID_TREE = 6;
 
 // --- the bet this market settles ---
 const FIXTURE_ID = BigInt(process.env.FIXTURE_ID ?? "0"); // set to a real World Cup fixtureId
@@ -58,9 +58,9 @@ function nodeSize(f: number, vs: number): number {
 }
 
 async function main() {
-  const payer = loadKp(join(homedir(), ".config/solana/id.json"));
-  const torna = loadKp(here("../deploy/torna-keypair.json")).publicKey;
-  const orderbook = loadKp(here("../deploy/orderbook-keypair.json")).publicKey;
+  const payer = loadKp(process.env.WALLET_KEYPAIR || join(homedir(), ".config/solana/id.json"));
+  const torna = process.env.TORNA_PROGRAM ? new PublicKey(process.env.TORNA_PROGRAM) : loadKp(here("../deploy/torna-keypair.json")).publicKey;
+  const orderbook = process.env.ORDERBOOK_PROGRAM ? new PublicKey(process.env.ORDERBOOK_PROGRAM) : loadKp(here("../deploy/orderbook-keypair.json")).publicKey;
   const [book, bump] = bookPda(orderbook, MARKET_ID);
   const [cfg] = cfgPda(orderbook, MARKET_ID);
   const [res] = resPda(orderbook, MARKET_ID);
@@ -124,13 +124,13 @@ async function main() {
   const demos = Array.from({ length: 4 }, () => Keypair.generate());
   const quoteAtaOf: Record<string, PublicKey> = {};
   for (const kp of demos) {
-    await send([SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: kp.publicKey, lamports: 80_000_000 })], [payer]);
+    await send([SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: kp.publicKey, lamports: 30_000_000 })], [payer]);
     // ATAs must exist before MINT_SET / trading
     quoteAtaOf[kp.publicKey.toBase58()] = (await getOrCreateAssociatedTokenAccount(conn, payer, quoteMint, kp.publicKey)).address;
     await getOrCreateAssociatedTokenAccount(conn, payer, baseMint, kp.publicKey); // YES ATA
     await getOrCreateAssociatedTokenAccount(conn, payer, noMint, kp.publicKey);   // NO ATA
     // give them quote: 500 for collateral + 500 for buying YES on the book
-    await mintTo(conn, payer, quoteMint, quoteAtaOf[kp.publicKey.toBase58()], payer, 1000);
+    await mintTo(conn, payer, quoteMint, quoteAtaOf[kp.publicKey.toBase58()], payer, 10000);
     // MINT_SET 200 sets -> 200 YES + 200 NO (deposits 200 quote collateral)
     await send([mintSetIx({ orderbook, marketId: MARKET_ID, user: kp.publicKey, amount: 200n, baseMint, noMint, quoteMint, quoteVault })], [payer, kp]);
   }

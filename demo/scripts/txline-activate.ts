@@ -114,7 +114,9 @@ async function activate(jwt: string, txSig: string, walletSignature: string, lea
     body: JSON.stringify({ txSig, walletSignature, leagues }),
   });
   if (!res.ok) throw new Error(`token/activate ${res.status}: ${await res.text()}`);
-  return (await res.json() as { token: string }).token;
+  // The activate endpoint returns the API token as PLAIN TEXT (e.g. "txoracle_api_..."), not JSON.
+  const body = (await res.text()).trim();
+  return body.startsWith("{") ? (JSON.parse(body) as { token: string }).token : body;
 }
 
 async function main() {
