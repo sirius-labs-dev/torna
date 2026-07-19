@@ -41,6 +41,7 @@ export interface Market {
     home?: string;
     away?: string;
     competition?: string;
+    resolveTx?: string;
   };
 }
 

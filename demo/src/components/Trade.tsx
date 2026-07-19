@@ -14,7 +14,8 @@ export function Trade({ actor, book, onDone }: { actor: Actor | null; book: { as
   // Track buy/sell INTENT, not book-side, so one color always means one direction. The book side is
   // derived: selling rests/hits asks when placing, hits bids when taking, and vice versa.
   const [dir, setDir] = useState<"buy" | "sell">("sell");
-  const [price, setPrice] = useState("103");
+  // default within a prediction market's 0–100 probability range (near mid); the bid/ask chips snap it exactly
+  const [price, setPrice] = useState("60");
   const [size, setSize] = useState("3");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<Toast>(null);

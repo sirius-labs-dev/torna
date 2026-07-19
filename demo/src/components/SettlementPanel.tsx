@@ -6,13 +6,13 @@
 // prediction/settlement layer (bringup-prediction.ts); a plain CLOB market shows nothing.
 import { useCallback, useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { Coins, Gavel, Trophy } from "lucide-react";
+import { Coins, Gavel, Trophy, ShieldCheck } from "lucide-react";
 import { mintSet, resolve, redeem, keypairActor, walletActor, type Actor } from "@/lib/actions";
 import { useTxlineStream } from "@/lib/txline/useTxlineStream";
 import {
-  MARKET, connection, demoKeypair, explorerTx, marketId, orderbookProgram, prediction, reader,
+  MARKET, connection, demoKeypair, explorerTx, explorerAddr, marketId, orderbookProgram, prediction, reader,
 } from "@/lib/market";
-import { readResolution } from "@/lib/orderbook";
+import { readResolution, resPda } from "@/lib/orderbook";
 
 interface LiveScore { scoreSoccer?: { p1: number; p2: number }; score?: { p1: number; p2: number }; gameState?: string; action?: string }
 const p1p2 = (s: LiveScore | null): [number, number] | null => {
@@ -132,6 +132,28 @@ export function SettlementPanel() {
           {msg.text}
           {msg.sig && <> · <a className="text-brand underline hover:text-brand-hi" href={explorerTx(msg.sig)} target="_blank" rel="noreferrer">view transaction</a></>}
         </p>
+      )}
+
+      {/* Verifiable resolution — the on-chain "receipt": the outcome is provable, not asserted. */}
+      {res?.resolved && (
+        <div className="mt-3 rounded-lg border border-bid/30 bg-bid/[0.04] px-3 py-2.5">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-bid">
+            <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> Settlement receipt · verifiable
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-muted">
+            Final score <span className="nums text-fg">{res.val0}–{res.val1}</span> ·{" "}
+            <span className="text-fg">{res.yesWon ? `${pred.home ?? "home"} won` : `${pred.home ?? "home"} did not win`}</span>.
+            Proven from TxLINE’s on-chain scores root and verified by txoracle <code className="text-faint">validate_stat_v3</code> —
+            no admin, no trusted relayer. Anyone can re-check it on-chain:
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+            {pred.resolveTx && (
+              <a className="text-brand underline hover:text-brand-hi" href={explorerTx(pred.resolveTx)} target="_blank" rel="noreferrer">resolve transaction ↗</a>
+            )}
+            <a className="text-brand underline hover:text-brand-hi" href={explorerAddr(resPda(orderbookProgram(), marketId())[0].toBase58())} target="_blank" rel="noreferrer">resolution account ↗</a>
+            <a className="text-muted hover:text-fg" href={explorerAddr(pred.oracleProgram)} target="_blank" rel="noreferrer">txoracle program ↗</a>
+          </div>
+        </div>
       )}
       <p className="mt-2 text-[11px] leading-relaxed text-faint">
         A YES share pays <span className="nums">{pred.payout}</span> if {pred.home ?? "the home team"} win and 0 if not — so its
