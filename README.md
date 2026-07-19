@@ -15,6 +15,18 @@ engine. The engine is written in C for SBF; **TornaDEX** is the reference order 
 - **SDK:** `torna-sdk` on [npm](https://www.npmjs.com/package/torna-sdk) (TypeScript) and [crates.io](https://crates.io/crates/torna-sdk) (Rust), byte-equivalent
 - **Status:** deployed on devnet, in-house adversarial-reviewed to convergence, external audit pending
 
+## TxODDS World Cup hackathon — two products on Torna
+
+This fork ships **two live products** built on the Torna engine, each entered in a different track.
+They share the engine and the TxLINE settlement layer, and they're two faces of the same
+trust-minimized core: **the outcome is decided by an on-chain proof, never an admin.** One is the
+analytical market; the other is the consumer game. Full write-up in [`demo/README.md`](demo/README.md).
+
+| Product | Track | What it is | Live |
+|---|---|---|---|
+| **TornaLine** | Prediction Markets & Settlement | On-chain prediction market on live World Cup football. Trade outcome shares on a parallel order book; when the match ends, **anyone settles the market trustlessly** — TxLINE's oracle verifies a Merkle proof of the result on-chain, no admin, no relayer. | [tornaline.vercel.app](https://tornaline.vercel.app) |
+| **TornaFan** | Consumer & Fan Experiences | A one-tap Higher/Lower game with a **live on-chain leaderboard**, scored by verifiable TxLINE data so no one can rig the board — massively multiplayer because each leaderboard node is its own account (Torna's parallelism). | [tornafan.vercel.app](https://tornafan.vercel.app) |
+
 ## Why
 
 Sorted on-chain state with many concurrent writers (an order book, a liquidation queue, a leaderboard)
@@ -36,7 +48,7 @@ textbook; it is this layout plus a client SDK that makes account resolution invi
 | `cpi-probe/` | Composability proof: a program CPIs InsertFast and parallelism survives. | Rust / SBF |
 | `bench/` | The parallelism benchmark on a real validator banking stage. | Rust |
 | `integration/`, `test/` | LiteSVM integration, on-chain differential, fuzz, CU, host property tests. | Rust / C |
-| `demo/` | The Next.js demo site: TornaDEX trading, docs, research, and a Torna-aware explorer. | TypeScript |
+| `demo/` | The Next.js app for the two hackathon products — **TornaLine** (prediction market + trustless settlement) and **TornaFan** (fan game + live on-chain leaderboard) — plus docs and a Torna-aware explorer. See [`demo/README.md`](demo/README.md). | TypeScript |
 
 ## Quickstart (SDK)
 
