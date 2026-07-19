@@ -19,7 +19,8 @@ export function FanGame() {
   const [me, setMe] = useState(0); // demo player index
   const [busy, setBusy] = useState<0 | 1 | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const stat = STAT_LABEL[FAN.statKey] ?? "the stat";
+  const stat = FAN.statLabel ?? STAT_LABEL[FAN.statKey] ?? "the stat";
+  const matchup = FAN.home && FAN.away ? `${FAN.home} vs ${FAN.away}` : `fixture ${FAN.fixtureId}`;
 
   const load = useCallback(async () => {
     try {
@@ -55,7 +56,7 @@ export function FanGame() {
     <div className="mx-auto max-w-2xl space-y-4">
       {/* the question */}
       <div className="rounded-2xl border border-line bg-panel p-6 text-center">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">World Cup · fixture {FAN.fixtureId} · round {round?.roundId ?? "—"}</div>
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">World Cup · {matchup} · round {round?.roundId ?? "—"}</div>
         <h2 className="display mt-2 text-2xl font-semibold tracking-tight">
           Will <span className="text-brand">{stat}</span> go higher before the next update?
         </h2>

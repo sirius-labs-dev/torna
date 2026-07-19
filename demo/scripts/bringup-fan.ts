@@ -83,6 +83,7 @@ async function main() {
     gameId: GAME_ID.toString(), lbTreeId: LB_TREE, creator: payer.publicKey.toBase58(),
     game: game.toBase58(), lb: lb.toBase58(), lbHeader: tree.headerPda()[0].toBase58(),
     fixtureId: FIXTURE_ID.toString(), statKey: STAT_KEY, statPeriod: STAT_PERIOD, roundId: ROUND_ID,
+    statLabel: process.env.STAT_LABEL, home: process.env.HOME_TEAM, away: process.env.AWAY_TEAM,
     players: players.map((k, i) => ({ pubkey: k.publicKey.toBase58(), secret: Array.from(k.secretKey), pick: PICKS[i] })),
   };
   writeFileSync(here("../src/lib/fan.json"), JSON.stringify(fan, null, 2));
