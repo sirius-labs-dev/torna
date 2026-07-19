@@ -1,4 +1,5 @@
 import { FanGame } from "@/components/FanGame";
+import { ProvenFan } from "@/components/ProvenFan";
 
 export const metadata = {
   title: "TornaFan — call the match, climb the board",
@@ -17,6 +18,7 @@ export default function FanPage() {
         </p>
       </div>
       <FanGame />
+      <ProvenFan />
     </div>
   );
 }

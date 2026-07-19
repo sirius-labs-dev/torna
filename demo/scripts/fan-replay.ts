@@ -18,7 +18,7 @@ const SEQ = Number(process.env.SEQ ?? "1195");
 const ROUNDS = Number(process.env.ROUNDS ?? "6");
 const DELAY_MS = Number(process.env.DELAY_MS ?? "4000");
 const here = (p: string) => join(import.meta.dirname, p);
-const fan = JSON.parse(readFileSync(here("../src/lib/fan.json"), "utf8"));
+const fan = JSON.parse(readFileSync(process.env.FAN_CONFIG ?? here("../src/lib/fan.json"), "utf8"));
 const conn = new Connection(RPC, "confirmed");
 const reader: AccountReader = { async accountData(k) { const a = await conn.getAccountInfo(k, "confirmed"); return a ? Uint8Array.from(a.data) : null; } };
 const kp = (s: number[]) => Keypair.fromSecretKey(Uint8Array.from(s));
