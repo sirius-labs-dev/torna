@@ -477,3 +477,106 @@ export async function readResolution(
   const R_RESOLVED = 100, R_WINNING = 101, R_VAL0 = 102, R_VAL1 = 106;
   return { resolved: d[R_RESOLVED] === 1, yesWon: d[R_WINNING] === 1, val0: dv.getInt32(R_VAL0, true), val1: dv.getInt32(R_VAL1, true) };
 }
+
+// ============================================================================================
+// TornaFan — Hi-Lo pick'em ix builders (mirror the pickem section of orderbook/src/lib.rs)
+// ============================================================================================
+
+const INIT_GAME = 9, PLACE_PICK = 10, RESOLVE_ROUND = 11, SCORE_ONE = 12, INIT_PLAYER = 13;
+
+export function gamePda(program: PublicKey, gameId: bigint): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([Buffer.from("game"), u64le(gameId)], program);
+}
+export function lbPda(program: PublicKey, gameId: bigint): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([Buffer.from("lb"), u64le(gameId)], program);
+}
+export function playerPda(program: PublicKey, gameId: bigint, player: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([Buffer.from("pl"), u64le(gameId), player.toBytes()], program);
+}
+export function pickPda(program: PublicKey, gameId: bigint, roundId: number, player: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([Buffer.from("pk"), u64le(gameId), u32le(roundId), player.toBytes()], program);
+}
+
+/** InitGame (disc 9): create the game config + bind its leaderboard tree (authority = lb PDA). */
+export function initGameIx(args: {
+  program: PublicKey; gameId: bigint; authority: PublicKey; torna: PublicKey; lbHeader: PublicKey;
+  oracleProgram: PublicKey; fixtureId: bigint; statKey: number; statPeriod: number; roundId: number; prevValue: number; rent: bigint;
+}): TransactionInstruction {
+  const [game] = gamePda(args.program, args.gameId);
+  const [lb] = lbPda(args.program, args.gameId);
+  const data = concat([
+    Uint8Array.of(INIT_GAME), u64le(args.gameId), u64le(args.fixtureId), u32le(args.statKey), i32le(args.statPeriod),
+    u32le(args.roundId), i32le(args.prevValue), args.oracleProgram.toBytes(), u64le(args.rent),
+  ]);
+  return new TransactionInstruction({
+    programId: args.program, data,
+    keys: [m(args.authority, true, true), m(game, false, true), m(lb, false, false), m(args.torna, false, false), m(args.lbHeader, false, false), m(SystemProgram.programId, false, false)],
+  });
+}
+
+/** InitPlayer (disc 13): create a player's score/streak PDA once. */
+export function initPlayerIx(args: { program: PublicKey; gameId: bigint; payer: PublicKey; player: PublicKey; rent: bigint }): TransactionInstruction {
+  const [pl, bump] = playerPda(args.program, args.gameId, args.player);
+  const [game] = gamePda(args.program, args.gameId);
+  const data = concat([Uint8Array.of(INIT_PLAYER), u64le(args.gameId), args.player.toBytes(), Uint8Array.of(bump), u64le(args.rent)]);
+  return new TransactionInstruction({
+    programId: args.program, data,
+    keys: [m(args.payer, true, true), m(pl, false, true), m(game, false, false), m(SystemProgram.programId, false, false)],
+  });
+}
+
+/** PlacePick (disc 10): a player calls Higher(1)/Lower(0) for the current round. */
+export function placePickIx(args: { program: PublicKey; gameId: bigint; roundId: number; player: PublicKey; dir: 0 | 1; rent: bigint }): TransactionInstruction {
+  const [game] = gamePda(args.program, args.gameId);
+  const [pick, bump] = pickPda(args.program, args.gameId, args.roundId, args.player);
+  const data = concat([Uint8Array.of(PLACE_PICK), u64le(args.gameId), u32le(args.roundId), Uint8Array.of(args.dir), Uint8Array.of(bump), u64le(args.rent)]);
+  return new TransactionInstruction({
+    programId: args.program, data,
+    keys: [m(args.player, true, true), m(game, false, false), m(pick, false, true), m(SystemProgram.programId, false, false)],
+  });
+}
+
+/** ResolveRound (disc 11): verify the round's stat via the TxLINE proof + stamp Higher/Lower. */
+export function resolveRoundIx(args: { program: PublicKey; gameId: bigint; caller: PublicKey; oracleProgram: PublicKey; payload: Uint8Array; epochDay: number }): TransactionInstruction {
+  const [game] = gamePda(args.program, args.gameId);
+  const [roots] = scoresRootPda(args.oracleProgram, args.epochDay);
+  const data = concat([Uint8Array.of(RESOLVE_ROUND), u64le(args.gameId), args.payload]);
+  return new TransactionInstruction({
+    programId: args.program, data,
+    keys: [m(args.caller, true, true), m(game, false, true), m(args.oracleProgram, false, false), m(roots, false, false)],
+  });
+}
+
+/** ScoreOne (disc 12): score one player + mirror to the leaderboard. `caller` signs (a keeper, or
+ *  the player themselves); `player` identifies the PDAs. `path` = the leaf accounts for key=player.
+ *  Parallel across players (different leaves). Mirrors score_one accounts:
+ *  [caller(s), game, player_pda(w), pick, lb, torna, lb_header, path...]. */
+export async function scoreOneIx(args: {
+  reader: AccountReader; program: PublicKey; gameId: bigint; roundId: number; caller: PublicKey; player: PublicKey; torna: PublicKey; lbTree: Tree;
+}): Promise<TransactionInstruction> {
+  const [game] = gamePda(args.program, args.gameId);
+  const [lb, lbBump] = lbPda(args.program, args.gameId);
+  const [pl] = playerPda(args.program, args.gameId, args.player);
+  const [pick] = pickPda(args.program, args.gameId, args.roundId, args.player);
+  const header = args.lbTree.headerPda()[0];
+  const path = await args.lbTree.path(args.reader, args.player.toBytes());
+  if (!path) throw new Error("leaderboard tree not initialized / path unresolved");
+  const data = concat([
+    Uint8Array.of(SCORE_ONE), u64le(args.gameId), u32le(args.roundId), args.player.toBytes(),
+    Uint8Array.of(lbBump), Uint8Array.of(path.length),
+  ]);
+  return new TransactionInstruction({
+    programId: args.program, data,
+    keys: [
+      m(args.caller, true, true), m(game, false, false), m(pl, false, true), m(pick, false, false),
+      m(lb, false, false), m(args.torna, false, false), m(header, false, false),
+      ...path.map((n, i) => m(args.lbTree.nodePda(n)[0], false, i === path.length - 1)),
+    ],
+  });
+}
+
+/** Decode a leaderboard leaf value (40B): score(8 BE) | streak(8 BE). */
+export function decodeLbValue(v: Uint8Array): { score: number; streak: number } {
+  const dv = new DataView(v.buffer, v.byteOffset, v.byteLength);
+  return { score: Number(dv.getBigUint64(0, false)), streak: Number(dv.getBigUint64(8, false)) };
+}

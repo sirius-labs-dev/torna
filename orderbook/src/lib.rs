@@ -28,8 +28,47 @@ const RESOLVE: u8 = 5;      // verify TxLINE score proof on-chain -> stamp the w
 const REDEEM: u8 = 6;       // burn winning-side shares -> pay `payout` quote from the vault
 const INIT_OUTCOME: u8 = 7; // one-time: bind fixture + outcome spec + NO mint + payout to the market
 const MINT_SET: u8 = 8;     // deposit collateral -> mint an equal YES+NO complete set (keeps REDEEM solvent)
+// --- TornaFan pick'em / live-leaderboard layer (see the fan section at end of file) ---
+const INIT_GAME: u8 = 9;    // create a Hi-Lo game + bind its on-chain leaderboard (Torna) + fixture/oracle
+const PLACE_PICK: u8 = 10;  // a player calls Higher/Lower for the current round
+const RESOLVE_ROUND: u8 = 11; // verify the round's stat via TxLINE proof, stamp Higher/Lower, advance
+const SCORE_ONE: u8 = 12;   // score one player's pick + mirror to the leaderboard (parallel across players)
+const INIT_PLAYER: u8 = 13; // one-time: create a player's score/streak state PDA
 const ASK: u8 = 0;
 const MAXK: usize = 8;
+
+// TornaFan game config PDA [b"game", game_id]: the fixture + the stat we're calling, the txoracle,
+// the current round + previous value, the resolved round's Higher/Lower outcome, and the leaderboard
+// (torna program + its header, whose authority is the [b"lb", game_id] PDA).
+const GAME_MAGIC: u32 = 0x3447_414d; // "MGA4"
+const GAME_SIZE: usize = 131;
+const G_BUMP: usize = 4;
+const G_FIXTURE: usize = 5;        // u64  TxLINE fixtureId
+const G_STAT_KEY: usize = 13;      // u32  ScoreStat key we call Hi-Lo on (e.g. corners)
+const G_STAT_PERIOD: usize = 17;   // i32  ScoreStat period
+const G_ORACLE: usize = 21;        // [u8;32] txoracle
+const G_TORNA: usize = 53;         // [u8;32] torna program
+const G_LB_HEADER: usize = 85;     // [u8;32] leaderboard tree header (authority = [b"lb", game_id])
+const G_ROUND_ID: usize = 117;     // u32  current open round
+const G_PREV_VALUE: usize = 121;   // i32  the stat value the current round is called against
+const G_LAST_ROUND: usize = 125;   // u32  last resolved round
+const G_OUTCOME: usize = 129;      // u8   0=lower, 1=higher, 2=push (for the last resolved round)
+const G_LB_BUMP: usize = 130;      // u8   bump of the [b"lb", game_id] leaderboard authority PDA
+
+// Player state PDA [b"pl", game_id, player]: the source of truth for a player's score/streak.
+const PLAYER_MAGIC: u32 = 0x344c_5040; // "PL4@"
+const PLAYER_SIZE: usize = 20;
+const P_BUMP: usize = 4;
+const P_SCORE: usize = 5;          // u32
+const P_STREAK: usize = 9;         // u16
+const P_IN_LB: usize = 11;         // u8  1 once the player has a leaderboard entry
+const P_SCORED_ROUND: usize = 12;  // u32 last round this player was scored for (no double-scoring)
+
+// Pick PDA [b"pk", game_id, round_id, player]: one Higher/Lower call.
+const PICK_MAGIC: u32 = 0x344b_4350; // "PCK4"
+const PICK_SIZE: usize = 6;
+const PK_BUMP: usize = 4;
+const PK_DIR: usize = 5;           // u8  0=lower, 1=higher
 
 // SPL Token program + token-account layout (mint @0, owner @32, amount @64)
 const TOKEN_PROGRAM: Pubkey = solana_program::pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
@@ -296,6 +335,11 @@ fn process(pid: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult
         MINT_SET => mint_set(pid, accounts, data),
         RESOLVE => resolve(pid, accounts, data),
         REDEEM => redeem(pid, accounts, data),
+        INIT_GAME => init_game(pid, accounts, data),
+        PLACE_PICK => place_pick(pid, accounts, data),
+        RESOLVE_ROUND => resolve_round(pid, accounts, data),
+        SCORE_ONE => score_one(pid, accounts, data),
+        INIT_PLAYER => init_player(pid, accounts, data),
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }
@@ -928,5 +972,293 @@ fn redeem(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Program
     // 1) burn the winning shares (holder signs) 2) pay quote from the vault (book PDA signs)
     token_op(TOKEN_BURN, token, holder_win, win_mint, holder, amount, None)?;
     token_transfer(token, quote_vault, holder_quote, book, payoff, Some(&[seeds]))?;
+    Ok(())
+}
+
+// ============================================================================================
+// TornaFan — Hi-Lo pick'em with a live, on-chain leaderboard
+// --------------------------------------------------------------------------------------------
+// A game calls Hi-Lo on one TxLINE stat (e.g. corners). Players PLACE_PICK Higher/Lower for the open
+// round. RESOLVE_ROUND verifies the round's stat with a TxLINE proof (trustless) and stamps the
+// Higher/Lower outcome. SCORE_ONE then scores one player and mirrors their score to the leaderboard
+// Torna tree — keyed by player, so N players' updates touch N different leaves and commit in
+// PARALLEL in one slot. The ranking itself is a cheap off-chain re-sort of the tree.
+// ============================================================================================
+
+/// Create a program-owned PDA account via the system program, signed by `seeds`.
+fn create_pda<'a>(
+    payer: &AccountInfo<'a>, acct: &AccountInfo<'a>, system: &AccountInfo<'a>,
+    program_id: &Pubkey, rent: u64, size: usize, seeds: &[&[u8]],
+) -> ProgramResult {
+    let mut cd = vec![0u8; 4];
+    cd.extend_from_slice(&rent.to_le_bytes());
+    cd.extend_from_slice(&(size as u64).to_le_bytes());
+    cd.extend_from_slice(program_id.as_ref());
+    let create = Instruction {
+        program_id: Pubkey::default(),
+        accounts: vec![AccountMeta::new(*payer.key, true), AccountMeta::new(*acct.key, true)],
+        data: cd,
+    };
+    invoke_signed(&create, &[payer.clone(), acct.clone(), system.clone()], &[seeds])
+}
+
+/// Validate a program-owned PDA: owner, magic, and the canonical seeds (from the stored bump at `G_BUMP`/`P_BUMP`).
+fn check_pda(acct: &AccountInfo, program_id: &Pubkey, magic: u32, size: usize, bump_off: usize, seeds_no_bump: &[&[u8]]) -> ProgramResult {
+    if acct.owner != program_id { return Err(ProgramError::IncorrectProgramId); }
+    let d = acct.try_borrow_data()?;
+    if d.len() < size || u32::from_le_bytes(d[0..4].try_into().unwrap()) != magic { return Err(ProgramError::InvalidAccountData); }
+    let bump = d[bump_off];
+    let mut seeds: Vec<&[u8]> = seeds_no_bump.to_vec();
+    let b = [bump];
+    seeds.push(&b);
+    let derived = Pubkey::create_program_address(&seeds, program_id).map_err(|_| ProgramError::InvalidArgument)?;
+    if derived != *acct.key { return Err(ProgramError::InvalidArgument); }
+    Ok(())
+}
+
+/// Leaderboard value (40B, matches the tree's value_size): score(8 BE) | streak(8 BE) | pad.
+fn lb_value(score: u32, streak: u16) -> [u8; 40] {
+    let mut v = [0u8; 40];
+    v[0..8].copy_from_slice(&(score as u64).to_be_bytes());
+    v[8..16].copy_from_slice(&(streak as u64).to_be_bytes());
+    v
+}
+
+/// InitGame: create the game config + bind its leaderboard tree (authority = [b"lb", game_id]).
+/// data: [9][game_id u64][fixture_id u64][stat_key u32][stat_period i32][round_id u32][prev_value i32]
+///        [oracle 32][rent u64]
+/// accounts: [authority(s,w), game_cfg(w), lb_pda, torna, lb_header, system]
+fn init_game(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+    if data.len() < 73 { return Err(ProgramError::InvalidInstructionData); }
+    if accounts.len() < 6 { return Err(ProgramError::NotEnoughAccountKeys); }
+    let game_id = rd_u64(data, 1);
+    let fixture_id = rd_u64(data, 9);
+    let stat_key = u32::from_le_bytes(data[17..21].try_into().unwrap());
+    let stat_period = i32::from_le_bytes(data[21..25].try_into().unwrap());
+    let round_id = u32::from_le_bytes(data[25..29].try_into().unwrap());
+    let prev_value = i32::from_le_bytes(data[29..33].try_into().unwrap());
+    let oracle: [u8; 32] = data[33..65].try_into().unwrap();
+    let rent = rd_u64(data, 65);
+    let (authority, game, lb, torna, lb_header, system) =
+        (&accounts[0], &accounts[1], &accounts[2], &accounts[3], &accounts[4], &accounts[5]);
+    if !authority.is_signer { return Err(ProgramError::MissingRequiredSignature); }
+
+    let gid = game_id.to_le_bytes();
+    let (game_pda, game_bump) = Pubkey::find_program_address(&[b"game", &gid], program_id);
+    let (lb_pda, lb_bump) = Pubkey::find_program_address(&[b"lb", &gid], program_id);
+    if game_pda != *game.key || lb_pda != *lb.key { return Err(ProgramError::InvalidArgument); }
+
+    // the leaderboard header must be a genuine Torna tree whose sole writer is the lb PDA, value_size 40
+    if lb_header.owner != torna.key { return Err(ProgramError::IncorrectProgramId); }
+    {
+        let hd = lb_header.try_borrow_data()?;
+        if hd.len() < H_AUTHORITY + 32 { return Err(ProgramError::InvalidArgument); }
+        if hd[H_AUTHORITY..H_AUTHORITY + 32] != lb.key.to_bytes() { return Err(ProgramError::InvalidArgument); }
+        if u16::from_le_bytes(hd[H_VALUE_SIZE..H_VALUE_SIZE + 2].try_into().unwrap()) != 40 { return Err(ProgramError::InvalidArgument); }
+    }
+
+    create_pda(authority, game, system, program_id, rent, GAME_SIZE, &[b"game", &gid, &[game_bump]])?;
+    let mut d = game.try_borrow_mut_data()?;
+    d[0..4].copy_from_slice(&GAME_MAGIC.to_le_bytes());
+    d[G_BUMP] = game_bump;
+    d[G_FIXTURE..G_FIXTURE + 8].copy_from_slice(&fixture_id.to_le_bytes());
+    d[G_STAT_KEY..G_STAT_KEY + 4].copy_from_slice(&stat_key.to_le_bytes());
+    d[G_STAT_PERIOD..G_STAT_PERIOD + 4].copy_from_slice(&stat_period.to_le_bytes());
+    d[G_ORACLE..G_ORACLE + 32].copy_from_slice(&oracle);
+    d[G_TORNA..G_TORNA + 32].copy_from_slice(torna.key.as_ref());
+    d[G_LB_HEADER..G_LB_HEADER + 32].copy_from_slice(lb_header.key.as_ref());
+    d[G_ROUND_ID..G_ROUND_ID + 4].copy_from_slice(&round_id.to_le_bytes());
+    d[G_PREV_VALUE..G_PREV_VALUE + 4].copy_from_slice(&prev_value.to_le_bytes());
+    d[G_LAST_ROUND..G_LAST_ROUND + 4].copy_from_slice(&0u32.to_le_bytes());
+    d[G_OUTCOME] = 2; // none yet
+    d[G_LB_BUMP] = lb_bump;
+    Ok(())
+}
+
+/// PlacePick: record a Higher/Lower call for the current open round.
+/// data: [10][game_id u64][round_id u32][dir u8][pk_bump u8][rent u64]
+/// accounts: [player(s,w), game_cfg, pick(w), system]
+fn place_pick(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+    if data.len() < 23 { return Err(ProgramError::InvalidInstructionData); }
+    if accounts.len() < 4 { return Err(ProgramError::NotEnoughAccountKeys); }
+    let game_id = rd_u64(data, 1);
+    let round_id = u32::from_le_bytes(data[9..13].try_into().unwrap());
+    let dir = data[13];
+    let pk_bump = data[14];
+    let rent = rd_u64(data, 15);
+    let (player, game, pick, system) = (&accounts[0], &accounts[1], &accounts[2], &accounts[3]);
+    if !player.is_signer { return Err(ProgramError::MissingRequiredSignature); }
+    if dir > 1 { return Err(ProgramError::InvalidArgument); }
+
+    let gid = game_id.to_le_bytes();
+    check_pda(game, program_id, GAME_MAGIC, GAME_SIZE, G_BUMP, &[b"game", &gid])?;
+    { // pick must be for the CURRENT open round
+        let g = game.try_borrow_data()?;
+        if u32::from_le_bytes(g[G_ROUND_ID..G_ROUND_ID + 4].try_into().unwrap()) != round_id {
+            return Err(ProgramError::InvalidArgument);
+        }
+    }
+    let rid = round_id.to_le_bytes();
+    let seeds: &[&[u8]] = &[b"pk", &gid, &rid, player.key.as_ref(), &[pk_bump]];
+    let derived = Pubkey::create_program_address(seeds, program_id).map_err(|_| ProgramError::InvalidArgument)?;
+    if derived != *pick.key { return Err(ProgramError::InvalidArgument); }
+
+    create_pda(player, pick, system, program_id, rent, PICK_SIZE, seeds)?;
+    let mut d = pick.try_borrow_mut_data()?;
+    d[0..4].copy_from_slice(&PICK_MAGIC.to_le_bytes());
+    d[PK_BUMP] = pk_bump;
+    d[PK_DIR] = dir;
+    Ok(())
+}
+
+/// ResolveRound: verify the round's stat via a TxLINE proof, stamp Higher/Lower, advance the round.
+/// The proof makes it trustless — the outcome comes from TxLINE's on-chain root, not the caller.
+/// data: [11][game_id u64][payload: borsh StatValidationInputV3]
+/// accounts: [caller(s), game_cfg(w), oracle, daily_scores_roots]
+fn resolve_round(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+    if data.len() < 9 { return Err(ProgramError::InvalidInstructionData); }
+    if accounts.len() < 4 { return Err(ProgramError::NotEnoughAccountKeys); }
+    let game_id = rd_u64(data, 1);
+    let payload_bytes = &data[9..];
+    let (caller, game, oracle, roots) = (&accounts[0], &accounts[1], &accounts[2], &accounts[3]);
+    if !caller.is_signer { return Err(ProgramError::MissingRequiredSignature); }
+
+    let gid = game_id.to_le_bytes();
+    check_pda(game, program_id, GAME_MAGIC, GAME_SIZE, G_BUMP, &[b"game", &gid])?;
+    let (stat_key, stat_period, oracle_want, round_id, prev_value) = {
+        let g = game.try_borrow_data()?;
+        (u32::from_le_bytes(g[G_STAT_KEY..G_STAT_KEY + 4].try_into().unwrap()),
+         i32::from_le_bytes(g[G_STAT_PERIOD..G_STAT_PERIOD + 4].try_into().unwrap()),
+         <[u8; 32]>::try_from(&g[G_ORACLE..G_ORACLE + 32]).unwrap(),
+         u32::from_le_bytes(g[G_ROUND_ID..G_ROUND_ID + 4].try_into().unwrap()),
+         i32::from_le_bytes(g[G_PREV_VALUE..G_PREV_VALUE + 4].try_into().unwrap()))
+    };
+    if oracle.key.to_bytes() != oracle_want { return Err(ProgramError::IncorrectProgramId); }
+
+    // parse the proof payload; the single proven leaf must be OUR stat.
+    let payload = StatValidationInputV3::try_from_slice(payload_bytes).map_err(|_| ProgramError::InvalidInstructionData)?;
+    if payload.leaves.len() != 1 { return Err(ProgramError::InvalidArgument); }
+    let leaf = &payload.leaves[0].stat;
+    if leaf.key != stat_key || leaf.period != stat_period { return Err(ProgramError::InvalidArgument); }
+    let proven = leaf.value;
+
+    // roots PDA for the proof's own day, under the bound oracle
+    let epoch_day = payload.ts.div_euclid(MS_PER_DAY) as u16;
+    let (roots_pda, _) = Pubkey::find_program_address(&[SCORES_ROOTS_SEED, &epoch_day.to_le_bytes()], oracle.key);
+    if roots_pda != *roots.key || roots.owner != oracle.key { return Err(ProgramError::InvalidArgument); }
+
+    // an always-true predicate: we only need the oracle to VERIFY the proof (Ok), then trust the value.
+    let strategy = build_strategy(1, 0, 0, i32::MIN)?; // Single(index0): value > i32::MIN
+    cpi_validate_stat_v3(oracle, roots, payload_bytes, &strategy)?;
+
+    // binary Hi-Lo: provable stats (corners/cards/goals) only ever rise, so the call is "will it go
+    // up before the next update?" — Higher(1) if it increased, Lower(0) if it stayed the same.
+    let outcome: u8 = if proven > prev_value { 1 } else { 0 };
+    let mut d = game.try_borrow_mut_data()?;
+    d[G_LAST_ROUND..G_LAST_ROUND + 4].copy_from_slice(&round_id.to_le_bytes());
+    d[G_OUTCOME] = outcome;
+    d[G_PREV_VALUE..G_PREV_VALUE + 4].copy_from_slice(&proven.to_le_bytes());
+    d[G_ROUND_ID..G_ROUND_ID + 4].copy_from_slice(&(round_id + 1).to_le_bytes());
+    Ok(())
+}
+
+/// ScoreOne: score one player's pick for the last resolved round, and mirror their score to the
+/// leaderboard tree (keyed by player). Different players hit different leaves -> parallel across a
+/// batch of SCORE_ONE txs in the same slot.
+/// data: [12][game_id u64][round_id u32][player 32][lb_bump u8][path_len u8]
+/// accounts: [caller(s), game_cfg, player_pda(w), pick, lb_pda, torna, lb_header, path(leaf w)...]
+fn score_one(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+    if data.len() < 47 { return Err(ProgramError::InvalidInstructionData); }
+    if accounts.len() < 7 { return Err(ProgramError::NotEnoughAccountKeys); }
+    let game_id = rd_u64(data, 1);
+    let round_id = u32::from_le_bytes(data[9..13].try_into().unwrap());
+    let player: [u8; 32] = data[13..45].try_into().unwrap();
+    let lb_bump = data[45];
+    let path_len = data[46] as usize;
+    if accounts.len() < 7 + path_len { return Err(ProgramError::NotEnoughAccountKeys); }
+    let (caller, game, player_pda, pick, lb, torna, lb_header) =
+        (&accounts[0], &accounts[1], &accounts[2], &accounts[3], &accounts[4], &accounts[5], &accounts[6]);
+    let path = &accounts[7..7 + path_len];
+    if !caller.is_signer { return Err(ProgramError::MissingRequiredSignature); }
+
+    let gid = game_id.to_le_bytes();
+    check_pda(game, program_id, GAME_MAGIC, GAME_SIZE, G_BUMP, &[b"game", &gid])?;
+    let (last_round, outcome, torna_want, lb_header_want) = {
+        let g = game.try_borrow_data()?;
+        (u32::from_le_bytes(g[G_LAST_ROUND..G_LAST_ROUND + 4].try_into().unwrap()), g[G_OUTCOME],
+         <[u8; 32]>::try_from(&g[G_TORNA..G_TORNA + 32]).unwrap(),
+         <[u8; 32]>::try_from(&g[G_LB_HEADER..G_LB_HEADER + 32]).unwrap())
+    };
+    if round_id != last_round || outcome > 1 { return Err(ProgramError::InvalidArgument); } // resolved round, real outcome
+    if torna.key.to_bytes() != torna_want || lb_header.key.to_bytes() != lb_header_want { return Err(ProgramError::InvalidArgument); }
+    // bind the lb authority PDA
+    let derived_lb = Pubkey::create_program_address(&[b"lb", &gid, &[lb_bump]], program_id).map_err(|_| ProgramError::InvalidArgument)?;
+    if derived_lb != *lb.key { return Err(ProgramError::InvalidArgument); }
+
+    // the player + pick accounts must be this player's canonical PDAs
+    check_pda(player_pda, program_id, PLAYER_MAGIC, PLAYER_SIZE, P_BUMP, &[b"pl", &gid, &player])?;
+    let rid = round_id.to_le_bytes();
+    check_pda(pick, program_id, PICK_MAGIC, PICK_SIZE, PK_BUMP, &[b"pk", &gid, &rid, &player])?;
+
+    let dir = { let p = pick.try_borrow_data()?; p[PK_DIR] };
+    let (score, streak, in_lb) = {
+        let p = player_pda.try_borrow_data()?;
+        if u32::from_le_bytes(p[P_SCORED_ROUND..P_SCORED_ROUND + 4].try_into().unwrap()) == round_id && round_id != 0 {
+            // already scored this round (round 0 is the pre-game default, so allow it once)
+            return Err(ProgramError::InvalidArgument);
+        }
+        (u32::from_le_bytes(p[P_SCORE..P_SCORE + 4].try_into().unwrap()),
+         u16::from_le_bytes(p[P_STREAK..P_STREAK + 2].try_into().unwrap()), p[P_IN_LB])
+    };
+    let correct = dir == outcome;
+    let new_score = if correct { score + 1 } else { score };
+    let new_streak = if correct { streak + 1 } else { 0 };
+
+    // update the player's source of truth
+    {
+        let mut p = player_pda.try_borrow_mut_data()?;
+        p[P_SCORE..P_SCORE + 4].copy_from_slice(&new_score.to_le_bytes());
+        p[P_STREAK..P_STREAK + 2].copy_from_slice(&new_streak.to_le_bytes());
+        p[P_SCORED_ROUND..P_SCORED_ROUND + 4].copy_from_slice(&round_id.to_le_bytes());
+    }
+
+    // mirror to the leaderboard tree (key = player), for the off-chain rank scan. Parallel by leaf.
+    let key = player; // 32B
+    let value = lb_value(new_score, new_streak);
+    let seeds: &[&[u8]] = &[b"lb", &gid, &[lb_bump]];
+    if in_lb == 0 {
+        torna_cpi::insert_fast(torna, lb, lb_header, path, &key, &value, &[seeds])?;
+        let mut p = player_pda.try_borrow_mut_data()?;
+        p[P_IN_LB] = 1;
+    } else {
+        torna_cpi::update_fast(torna, lb, lb_header, path, &key, &value, &[seeds])?;
+    }
+    Ok(())
+}
+
+/// InitPlayer: create a player's score/streak state PDA [b"pl", game_id, player] once.
+/// data: [13][game_id u64][player 32][pl_bump u8][rent u64]
+/// accounts: [payer(s,w), player_pda(w), game_cfg, system]
+fn init_player(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
+    if data.len() < 50 { return Err(ProgramError::InvalidInstructionData); }
+    if accounts.len() < 4 { return Err(ProgramError::NotEnoughAccountKeys); }
+    let game_id = rd_u64(data, 1);
+    let player: [u8; 32] = data[9..41].try_into().unwrap();
+    let pl_bump = data[41];
+    let rent = rd_u64(data, 42);
+    let (payer, player_pda, game, system) = (&accounts[0], &accounts[1], &accounts[2], &accounts[3]);
+    if !payer.is_signer { return Err(ProgramError::MissingRequiredSignature); }
+
+    let gid = game_id.to_le_bytes();
+    check_pda(game, program_id, GAME_MAGIC, GAME_SIZE, G_BUMP, &[b"game", &gid])?;
+    let seeds: &[&[u8]] = &[b"pl", &gid, &player, &[pl_bump]];
+    let derived = Pubkey::create_program_address(seeds, program_id).map_err(|_| ProgramError::InvalidArgument)?;
+    if derived != *player_pda.key { return Err(ProgramError::InvalidArgument); }
+
+    create_pda(payer, player_pda, system, program_id, rent, PLAYER_SIZE, seeds)?;
+    let mut d = player_pda.try_borrow_mut_data()?;
+    d[0..4].copy_from_slice(&PLAYER_MAGIC.to_le_bytes());
+    d[P_BUMP] = pl_bump;
+    // score/streak/in_lb/scored_round are already zero
     Ok(())
 }
