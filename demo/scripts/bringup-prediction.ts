@@ -27,14 +27,17 @@ import {
 const RPC = process.env.RPC ?? "https://api.devnet.solana.com";
 const VS = 8 + 32; // 40: maker(32) + size_be(8)
 const F = 8;
-const MARKET_ID = 3n; // distinct from the plain CLOB demo (market 1)
-const ASK_TREE = 5;
-const BID_TREE = 6;
+const MARKET_ID = BigInt(process.env.MARKET_ID ?? "3"); // distinct from the plain CLOB demo (market 1)
+const ASK_TREE = Number(process.env.ASK_TREE ?? "5");
+const BID_TREE = Number(process.env.BID_TREE ?? "6");
 
 // --- the bet this market settles ---
 const FIXTURE_ID = BigInt(process.env.FIXTURE_ID ?? "0"); // set to a real World Cup fixtureId
 const PREDICATE: PredicateSpec = homeWin();               // YES = home win (goals P1 - P2 > 0 @ FT)
-const OUTCOME_LABEL = "Home win";
+const OUTCOME_LABEL = process.env.OUTCOME_LABEL ?? "Home win";
+const HOME = process.env.HOME_TEAM ?? "France";
+const AWAY = process.env.AWAY_TEAM ?? "England";
+const COMPETITION = process.env.COMPETITION ?? "World Cup";
 const STAT_KEYS = [1, 2];                                 // leg order: goals P1, goals P2
 const PAYOUT = 1n; // quote units per winning share (decimals 0 -> 1 == 1 whole unit)
 
@@ -172,6 +175,7 @@ async function main() {
       noMint: noMint.toBase58(), fixtureId: FIXTURE_ID.toString(),
       oracleProgram: TXORACLE_DEVNET.toBase58(), payout: PAYOUT.toString(),
       label: OUTCOME_LABEL, statKeys: STAT_KEYS,
+      home: HOME, away: AWAY, competition: COMPETITION,
     },
   };
   writeFileSync(here("../src/lib/market.json"), JSON.stringify(market, null, 2));
