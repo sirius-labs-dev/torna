@@ -20,9 +20,16 @@ export async function GET() {
     const prevValue = dv.getInt32(121, true);
     const lastRound = dv.getUint32(125, true);
     const outcome = d[129]; // 0=lower,1=higher,2=none
+    // the last write to the game PDA is the most recent RESOLVE_ROUND — surface it as the
+    // verifiable settlement receipt (the tx that ran the TxLINE proof CPI on-chain).
+    let lastTx: string | null = null;
+    try {
+      const sigs = await conn.getSignaturesForAddress(new PublicKey(fan.game), { limit: 1 }, "confirmed");
+      lastTx = sigs[0]?.signature ?? null;
+    } catch { /* receipt is best-effort */ }
     return NextResponse.json({
       gameId: fan.gameId, fixtureId: fan.fixtureId, statKey: fan.statKey,
-      roundId, prevValue, lastRound, lastOutcome: outcome === 2 ? null : outcome === 1 ? "higher" : "lower",
+      roundId, prevValue, lastRound, lastOutcome: outcome === 2 ? null : outcome === 1 ? "higher" : "lower", lastTx,
     }, { headers: { "cache-control": "no-store" } });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });

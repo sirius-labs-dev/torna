@@ -9,7 +9,7 @@ import { placePick } from "@/lib/fan-actions";
 import { FAN, STAT_LABEL } from "@/lib/fan";
 
 interface Row { player: string; score: number; streak: number }
-interface Round { roundId: number; statKey: number; prevValue: number; lastOutcome: "higher" | "lower" | null }
+interface Round { roundId: number; statKey: number; prevValue: number; lastOutcome: "higher" | "lower" | null; lastRound?: number; lastTx?: string | null }
 
 const short = (s: string) => `${s.slice(0, 4)}…${s.slice(-4)}`;
 
@@ -105,9 +105,15 @@ export function FanGame() {
             </div>
           ))
         )}
-        <div className="flex items-center gap-1.5 border-t border-line px-5 py-2.5 text-[11px] text-faint">
-          <ShieldCheck className="h-3.5 w-3.5 text-bid" aria-hidden />
-          Provably fair: every round is scored against a TxLINE proof on-chain — no admin can rig the board. Built on Torna&apos;s parallel index.
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 border-t border-line px-5 py-2.5 text-[11px] text-faint">
+          <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-bid" aria-hidden />
+          <span>Provably fair: every round is scored against a TxLINE proof on-chain — no admin can rig the board. Built on Torna&apos;s parallel index.</span>
+          {round?.lastTx && (
+            <a href={`https://explorer.solana.com/tx/${round.lastTx}?cluster=devnet`} target="_blank" rel="noreferrer"
+              className="font-medium text-bid underline decoration-dotted underline-offset-2 hover:text-fg">
+              verify round {round.lastRound ?? ""} on-chain ↗
+            </a>
+          )}
         </div>
       </div>
     </div>

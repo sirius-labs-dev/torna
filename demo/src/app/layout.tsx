@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Nav } from "@/components/Nav";
@@ -16,7 +17,11 @@ export const metadata: Metadata = {
     "TornaLine is an on-chain prediction market for live World Cup football. Trade outcome shares on a parallel order book; when the match ends, anyone settles the market trustlessly — TxLINE's oracle verifies a Merkle proof of the result on-chain, with no admin. Built on Torna.",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // tornafan.vercel.app internally rewrites / -> /fan, so the URL stays "/"; detect the fan product
+  // by host here (server-side) and brand the shared nav accordingly — no client flash.
+  const host = (await headers()).get("host") ?? "";
+  const fanMode = host.startsWith("tornafan");
   return (
     <html
       lang="en"
@@ -31,7 +36,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       </head>
       <body className="flex min-h-full flex-col">
         <WalletProviders>
-          <Nav />
+          <Nav fanMode={fanMode} />
           <main className="flex-1">{children}</main>
           <Footer />
         </WalletProviders>
