@@ -1,6 +1,7 @@
 import { Terminal } from "@/components/Terminal";
 import { DevX } from "@/components/DevX";
 import { SettlementPanel } from "@/components/SettlementPanel";
+import { ProvenSettlement } from "@/components/ProvenSettlement";
 import { isPredictionMarket } from "@/lib/market";
 
 export default function TradePage() {
@@ -23,6 +24,9 @@ export default function TradePage() {
       ) : (
         <Terminal />
       )}
+
+      {/* both worlds: the live market above settles the same way — here it is already proven */}
+      {pred && <ProvenSettlement />}
 
       {/* the CLOB under the hood (only shown as a secondary section on a prediction market) */}
       {pred && (
