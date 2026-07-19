@@ -301,6 +301,9 @@
     "statKeys": [
       1,
       2
-    ]
+    ],
+    "home": "France",
+    "away": "England",
+    "competition": "World Cup"
   }
 }

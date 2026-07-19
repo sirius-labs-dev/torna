@@ -76,16 +76,19 @@ export function SettlementPanel() {
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-wide text-faint">TornaLine · prediction market settlement</div>
-          <div className="mt-1 text-base font-semibold tracking-tight">
-            YES = <span className="text-brand">{pred.label}</span>
-            <span className="ml-2 text-xs font-normal text-faint">fixture {pred.fixtureId} · payout {pred.payout} quote/share</span>
+          <div className="mt-1 text-lg font-semibold tracking-tight">
+            {pred.home ?? "Home"} <span className="text-faint">vs</span> {pred.away ?? "Away"}
+          </div>
+          <div className="mt-0.5 text-sm text-muted">
+            YES = <span className="font-medium text-brand">{pred.home ?? "Home"} to win</span>
+            <span className="ml-2 text-xs text-faint">{pred.competition ?? "match"} · pays {pred.payout} if it happens</span>
           </div>
         </div>
-        {/* live TxLINE score */}
-        <div className="flex items-center gap-2 rounded-lg border border-line bg-bg-soft px-3 py-2">
-          <span className={`h-2 w-2 rounded-full ${streaming ? "bg-bid" : "bg-faint"}`} aria-hidden />
-          <span className="nums text-sm text-fg">{live ? `${live[0]} – ${live[1]}` : "– – –"}</span>
-          <span className="text-[11px] text-faint">{last?.gameState ?? (fixtureId ? "live score" : "set FIXTURE_ID")}</span>
+        {/* live / final TxLINE score */}
+        <div className="flex items-center gap-2.5 rounded-lg border border-line bg-bg-soft px-3.5 py-2">
+          <span className={`h-2 w-2 rounded-full ${!res?.resolved && streaming ? "bg-bid animate-pulse" : "bg-faint"}`} aria-hidden />
+          <span className="nums text-lg font-semibold text-fg">{res?.resolved ? `${res.val0} – ${res.val1}` : live ? `${live[0]} – ${live[1]}` : "– – –"}</span>
+          <span className="text-[11px] text-faint">{res?.resolved ? "full time" : last?.gameState ?? (fixtureId ? "live" : "—")}</span>
         </div>
         <span className={`ml-auto rounded-md border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${badge.cls}`}>{badge.text}</span>
       </div>
@@ -131,9 +134,10 @@ export function SettlementPanel() {
         </p>
       )}
       <p className="mt-2 text-[11px] leading-relaxed text-faint">
-        Mint deposits <span className="nums">{pred.payout}</span> quote per set and returns equal YES + NO. Trade YES on the
-        book above; its price is the implied probability of “{pred.label}”. Resolve verifies the final score
-        against TxLINE’s on-chain root — the outcome comes from the proof, not from whoever clicks.
+        A YES share pays <span className="nums">{pred.payout}</span> if {pred.home ?? "the home team"} win and 0 if not — so its
+        price in the book reads as the implied probability (a share at 62 ≈ a 62% chance). Mint deposits {pred.payout} quote and
+        returns an equal YES + NO pair. Resolve has TxLINE’s oracle verify a Merkle proof of the final score on-chain — the
+        outcome comes from the proof, not from whoever clicks.
       </p>
     </div>
   );

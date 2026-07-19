@@ -38,6 +38,9 @@ export interface Market {
     payout: string;
     label: string;
     statKeys: number[];
+    home?: string;
+    away?: string;
+    competition?: string;
   };
 }
 

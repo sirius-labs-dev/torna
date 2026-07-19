@@ -9,11 +9,35 @@ const GH = "https://github.com/nzengi/torna";
 export default function Home() {
   return (
     <>
-      {/* Hero: problem first, then the insight */}
+      {/* TornaLine: the product (hackathon), first */}
       <section className="relative overflow-hidden border-b border-line">
         <div className="hero-glow pointer-events-none absolute inset-0 -z-10" aria-hidden />
         <div className="mx-auto max-w-3xl px-6 pt-24 pb-16 text-center">
-          <p className="enter text-xs font-semibold uppercase tracking-[0.2em] text-brand">An on-chain index primitive for Solana</p>
+          <p className="enter text-xs font-semibold uppercase tracking-[0.2em] text-brand">On-chain prediction markets · settled on TxLINE proofs</p>
+          <h1 className="enter display mt-4 text-5xl font-semibold leading-[1.05] tracking-tight sm:text-6xl">
+            Call the match. <span className="text-gradient">Settle on the proof</span>.
+          </h1>
+          <p className="enter mx-auto mt-6 max-w-xl text-lg leading-relaxed text-muted" style={{ animationDelay: "70ms" }}>
+            <span className="font-medium text-fg">TornaLine</span> is an on-chain prediction market for live World Cup
+            football. Trade outcome shares on a parallel order book; when the match ends, anyone settles the market
+            trustlessly — TxLINE’s oracle verifies a Merkle proof of the result on-chain, with no admin and no trusted relayer.
+          </p>
+          <div className="enter mt-8 flex flex-wrap items-center justify-center gap-3" style={{ animationDelay: "140ms" }}>
+            <Link href="/trade" className="inline-flex items-center gap-2 rounded-lg bg-brand px-5 py-2.5 text-sm font-medium text-onbrand transition-colors duration-100 hover:bg-brand-hi active:translate-y-px">
+              Open the live market <ArrowRight className="h-4 w-4" aria-hidden />
+            </Link>
+            <a href="https://explorer.solana.com/tx/4hH3Wg9p9wQXqe2jGL3Mm3ELRTAwwHEdcAqkp9NhJvF4SdCT9PhKuhpxYUdFd6AoxRnNLfTDFXfTvMt2CAKSekMb?cluster=devnet" target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-line bg-panel px-5 py-2.5 text-sm font-medium text-fg transition-colors duration-100 hover:border-muted active:translate-y-px">
+              See a real settlement
+            </a>
+          </div>
+          <p className="mt-5 text-xs text-faint">TxODDS World Cup Hackathon · live on devnet · built on Torna, the parallel on-chain order book</p>
+        </div>
+      </section>
+
+      {/* The engine: Torna (why the writes run in parallel) */}
+      <section className="relative overflow-hidden border-b border-line">
+        <div className="mx-auto max-w-3xl px-6 pt-20 pb-16 text-center">
+          <p className="enter text-xs font-semibold uppercase tracking-[0.2em] text-brand">The engine underneath · Torna</p>
           <h1 className="enter display mt-4 text-5xl font-semibold leading-[1.05] tracking-tight sm:text-6xl" style={{ animationDelay: "70ms" }}>
             Sorted on-chain state that <span className="text-gradient">writes in parallel</span>.
           </h1>
