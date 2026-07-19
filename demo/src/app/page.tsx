@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, BarChart3, Boxes, Code2, Compass, FileText, ListOrdered, Trophy, Vote } from "lucide-react";
+import { ArrowRight, BarChart3, Code2, Compass, FileText } from "lucide-react";
 import { GithubIcon } from "@/components/ui/GithubIcon";
 import { LiveMarket } from "@/components/LiveMarket";
 import { Parallelism } from "@/components/Parallelism";
@@ -62,49 +62,19 @@ export default function Home() {
       {/* The moat: parallelism, with the honest caveat (4.6-7.1x lives here) */}
       <Parallelism />
 
-      {/* What you build on it */}
-      <section className="mx-auto max-w-6xl px-6 py-16">
-        <div className="text-center">
-          <h2 className="display text-3xl font-semibold tracking-tight">Build anything sorted</h2>
-          <p className="mx-auto mt-3 max-w-xl text-[15px] leading-relaxed text-muted">
-            Anything that needs sorted state with many concurrent writers maps onto one tree. You choose
-            what the key and value mean.
-          </p>
-        </div>
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[
-            { icon: BarChart3, t: "Order books", d: "Price-time priority, parallel maker quotes (matching stays serial), real escrow." },
-            { icon: ListOrdered, t: "Liquidation queues", d: "Sorted by health; keepers pop the worst, borrowers update in parallel." },
-            { icon: Trophy, t: "Leaderboards", d: "Top-N with cheap reads and concurrent score updates." },
-            { icon: Vote, t: "Governance", d: "Sorted stake or votes, queryable on-chain without an indexer." },
-            { icon: Boxes, t: "Expiry queues", d: "Ordered by deadline; the soonest to expire is the leftmost leaf." },
-            { icon: Code2, t: "Your sorted index", d: "Generic key to value, value up to 128 bytes per entry." },
-          ].map((c) => (
-            <div key={c.t} className="rounded-xl border border-line bg-panel p-5 transition-colors duration-150 hover:border-brand/40">
-              <c.icon className="h-5 w-5 text-brand" aria-hidden />
-              <h3 className="mt-3 text-sm font-semibold text-fg">{c.t}</h3>
-              <p className="mt-1.5 text-sm leading-relaxed text-muted">{c.d}</p>
-            </div>
-          ))}
-        </div>
-        <div className="mt-8 text-center">
-          <Link href="/build" className="inline-flex items-center gap-1.5 text-sm font-medium text-brand hover:text-brand-hi">See how to build one, in TypeScript or Rust <ArrowRight className="h-4 w-4" aria-hidden /></Link>
-        </div>
-      </section>
-
-      {/* Proof it works: TornaDEX (subordinate, the reference integration) */}
+      {/* Under the hood: the order book TornaLine trades on */}
       <section className="border-y border-line bg-bg-soft">
         <div className="mx-auto max-w-6xl px-6 py-16 lg:grid lg:grid-cols-2 lg:items-center lg:gap-12">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-brand">Proof it works</div>
-            <h2 className="display mt-2 text-3xl font-semibold tracking-tight">We built a full order book on it</h2>
+            <div className="text-xs font-semibold uppercase tracking-[0.2em] text-brand">Under the hood</div>
+            <h2 className="display mt-2 text-3xl font-semibold tracking-tight">A real order book, live on devnet</h2>
             <p className="mt-4 max-w-lg text-[15px] leading-relaxed text-muted">
-              TornaDEX is a central limit order book built entirely on Torna: real SPL-token escrow, place,
-              cancel, and match as real on-chain transactions, live on devnet. It is the reference
-              integration that proves the primitive end to end, not the product.
+              TornaLine trades on a central limit order book built entirely on Torna: real SPL-token escrow;
+              place, take, cancel, and match are real on-chain transactions. The book is read straight from
+              the on-chain B+ tree — no indexer — and a share&apos;s price is the implied probability.
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
-              <Link href="/trade" className="inline-flex items-center gap-1.5 font-medium text-brand hover:text-brand-hi">Trade it live <ArrowRight className="h-3.5 w-3.5" aria-hidden /></Link>
+              <Link href="/trade" className="inline-flex items-center gap-1.5 font-medium text-brand hover:text-brand-hi">Open the live market <ArrowRight className="h-3.5 w-3.5" aria-hidden /></Link>
               <Link href="/explorer" className="text-muted hover:text-fg">Inspect the on-chain trees</Link>
             </div>
           </div>
