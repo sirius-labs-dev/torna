@@ -15,17 +15,18 @@ engine. The engine is written in C for SBF; **TornaDEX** is the reference order 
 - **SDK:** `torna-sdk` on [npm](https://www.npmjs.com/package/torna-sdk) (TypeScript) and [crates.io](https://crates.io/crates/torna-sdk) (Rust), byte-equivalent
 - **Status:** deployed on devnet, in-house adversarial-reviewed to convergence, external audit pending
 
-## TxODDS World Cup hackathon — two products on Torna
+## TxODDS World Cup hackathon — TornaLine
 
-This fork ships **two live products** built on the Torna engine, each entered in a different track.
-They share the engine and the TxLINE settlement layer, and they're two faces of the same
-trust-minimized core: **the outcome is decided by an on-chain proof, never an admin.** One is the
-analytical market; the other is the consumer game. Full write-up in [`demo/README.md`](demo/README.md).
+**TornaLine** is an on-chain **prediction market** for live World Cup football, built on the Torna
+engine and entered in the **Prediction Markets & Settlement** track. Trade a match outcome as a share
+on a parallel order book; when the match ends, **anyone settles the market trustlessly** — TxLINE's
+oracle verifies a Merkle proof of the final score on-chain, with no admin and no trusted relayer. The
+outcome comes from the proof, not from whoever clicks. Full write-up in [`demo/README.md`](demo/README.md).
 
-| Product | Track | What it is | Live |
-|---|---|---|---|
-| **TornaLine** | Prediction Markets & Settlement | On-chain prediction market on live World Cup football. Trade outcome shares on a parallel order book; when the match ends, **anyone settles the market trustlessly** — TxLINE's oracle verifies a Merkle proof of the result on-chain, no admin, no relayer. | [tornaline.vercel.app](https://tornaline.vercel.app) |
-| **TornaFan** | Consumer & Fan Experiences | A one-tap Higher/Lower game with a **live on-chain leaderboard**, scored by verifiable TxLINE data so no one can rig the board — massively multiplayer because each leaderboard node is its own account (Torna's parallelism). | [tornafan.vercel.app](https://tornafan.vercel.app) |
+- **Live:** [tornaline.vercel.app](https://tornaline.vercel.app) · devnet
+- **Track:** Prediction Markets & Settlement
+- **The moat:** a real central-limit order book on Torna's parallel index + trustless settlement from a
+  verified TxLINE proof (`validate_stat_v3`) — no oracle you have to trust.
 
 ## Why
 
@@ -48,7 +49,7 @@ textbook; it is this layout plus a client SDK that makes account resolution invi
 | `cpi-probe/` | Composability proof: a program CPIs InsertFast and parallelism survives. | Rust / SBF |
 | `bench/` | The parallelism benchmark on a real validator banking stage. | Rust |
 | `integration/`, `test/` | LiteSVM integration, on-chain differential, fuzz, CU, host property tests. | Rust / C |
-| `demo/` | The Next.js app for the two hackathon products — **TornaLine** (prediction market + trustless settlement) and **TornaFan** (fan game + live on-chain leaderboard) — plus docs and a Torna-aware explorer. See [`demo/README.md`](demo/README.md). | TypeScript |
+| `demo/` | The Next.js app for **TornaLine** — the prediction market, order book, and trustless settlement — plus docs and a Torna-aware explorer. See [`demo/README.md`](demo/README.md). | TypeScript |
 
 ## Quickstart (SDK)
 
