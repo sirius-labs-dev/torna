@@ -14,8 +14,8 @@ import { transferAuthorityIx, initGameIx, initPlayerIx, placePickIx, gamePda, lb
 const RPC = process.env.RPC ?? "https://api.devnet.solana.com";
 const VS = 40; // leaderboard value: score(8 BE) | streak(8 BE) | pad
 const F = 8;
-const GAME_ID = 1n;
-const LB_TREE = 7;
+const GAME_ID = BigInt(process.env.GAME_ID ?? "1");
+const LB_TREE = Number(process.env.LB_TREE ?? "7");
 // --- the stat we call Hi-Lo on ---
 const FIXTURE_ID = BigInt(process.env.FIXTURE_ID ?? "18257865"); // default: France v England (de-risk)
 const STAT_KEY = Number(process.env.STAT_KEY ?? "1");            // 1=home goals (de-risk); corners=7/8 live

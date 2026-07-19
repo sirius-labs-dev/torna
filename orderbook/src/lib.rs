@@ -1139,7 +1139,11 @@ fn resolve_round(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> 
     let payload = StatValidationInputV3::try_from_slice(payload_bytes).map_err(|_| ProgramError::InvalidInstructionData)?;
     if payload.leaves.len() != 1 { return Err(ProgramError::InvalidArgument); }
     let leaf = &payload.leaves[0].stat;
-    if leaf.key != stat_key || leaf.period != stat_period { return Err(ProgramError::InvalidArgument); }
+    // Bind only the stat KEY: a live Hi-Lo game resolves at whatever the current in-play status
+    // (period) is, so the period varies across rounds and must not be pinned. The proof still binds
+    // the value to TxLINE's root, so the value is genuine. (stat_period is retained as metadata.)
+    let _ = stat_period;
+    if leaf.key != stat_key { return Err(ProgramError::InvalidArgument); }
     let proven = leaf.value;
 
     // roots PDA for the proof's own day, under the bound oracle
