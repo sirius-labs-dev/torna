@@ -29,8 +29,8 @@ export function Nav() {
       <div className="mx-auto flex max-w-6xl items-center gap-3 px-6 py-3">
         <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="Torna home">
           <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand text-[13px] font-bold text-onbrand">T</span>
-          <span className="text-lg font-semibold tracking-tight">Torna</span>
-          <span className="hidden text-xs text-faint lg:inline">· on-chain index</span>
+          <span className="text-lg font-semibold tracking-tight">TornaLine</span>
+          <span className="hidden text-xs text-faint lg:inline">· prediction markets</span>
         </Link>
         <nav className="flex flex-1 items-center gap-1 overflow-x-auto">
           {LINKS.map((l) => (
