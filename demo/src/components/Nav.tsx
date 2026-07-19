@@ -15,9 +15,6 @@ const WalletMultiButton = dynamic(
 const LINKS = [
   { href: "/", label: "Home" },
   { href: "/trade", label: "Markets" },
-  { href: "/build", label: "Build" },
-  { href: "/docs", label: "Docs" },
-  { href: "/research", label: "Research" },
   { href: "/explorer", label: "Explorer" },
 ];
 
@@ -44,9 +41,13 @@ export function Nav() {
               {l.label}
             </Link>
           ))}
+          <a href="https://torna.vercel.app" target="_blank" rel="noreferrer"
+            className="shrink-0 rounded-md px-3 py-1.5 text-sm text-muted transition-colors duration-100 hover:text-fg">
+            Torna ↗
+          </a>
         </nav>
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-          <a href="https://github.com/nzengi/torna" target="_blank" rel="noreferrer" aria-label="Torna on GitHub"
+          <a href="https://github.com/sirius-labs-dev/torna" target="_blank" rel="noreferrer" aria-label="TornaLine on GitHub"
             className="hidden rounded-md p-1.5 text-muted transition-colors duration-100 hover:bg-panel-hi hover:text-fg sm:flex">
             <GithubIcon className="h-5 w-5" />
           </a>

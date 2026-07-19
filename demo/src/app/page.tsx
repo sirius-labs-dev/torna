@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { ArrowRight, BarChart3, Code2, Compass, FileText } from "lucide-react";
+import { ArrowRight, Code2, Compass } from "lucide-react";
 import { GithubIcon } from "@/components/ui/GithubIcon";
 import { LiveMarket } from "@/components/LiveMarket";
 import { Parallelism } from "@/components/Parallelism";
 
-const GH = "https://github.com/nzengi/torna";
+const GH = "https://github.com/sirius-labs-dev/torna";
+const TORNA = "https://torna.vercel.app";
 
 export default function Home() {
   return (
@@ -30,7 +31,7 @@ export default function Home() {
               See a real settlement
             </a>
           </div>
-          <p className="mt-5 text-xs text-faint">TxODDS World Cup Hackathon · live on devnet · built on Torna, the parallel on-chain order book</p>
+          <p className="mt-5 text-xs text-faint">TxODDS World Cup Hackathon · live on devnet · built on <a href={TORNA} target="_blank" rel="noreferrer" className="underline hover:text-brand">Torna ↗</a>, the parallel on-chain order book</p>
         </div>
       </section>
 
@@ -74,7 +75,7 @@ export default function Home() {
               TornaLine trades on a central limit order book with real SPL-token escrow; place, take, cancel,
               and match are real on-chain transactions, read straight from the on-chain B+ tree — no indexer.
               Every price level is its own account, so a burst of orders on a goal commits in parallel — the
-              write concurrency a live football market needs. (That engine is Torna.)
+              write concurrency a live football market needs. (That engine is <a href={TORNA} target="_blank" rel="noreferrer" className="text-brand underline hover:text-brand-hi">Torna ↗</a>.)
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
               <Link href="/trade" className="inline-flex items-center gap-1.5 font-medium text-brand hover:text-brand-hi">Open the live market <ArrowRight className="h-3.5 w-3.5" aria-hidden /></Link>
@@ -88,28 +89,24 @@ export default function Home() {
       {/* The moat: why the order book runs in parallel (the goal-moment burst) */}
       <Parallelism />
 
-      {/* Explore */}
+      {/* Explore & verify */}
       <section className="mx-auto max-w-6xl px-6 py-16">
-        <h2 className="display text-center text-2xl font-semibold tracking-tight">Go deeper</h2>
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            { icon: Code2, t: "Build", d: "A code-first guide, TypeScript or Rust.", href: "/build" },
-            { icon: FileText, t: "Docs", d: "The primitive and the reference app, in full.", href: "/docs" },
-            { icon: BarChart3, t: "Research", d: "Motivation, the model, and the measured numbers.", href: "/research" },
-            { icon: Compass, t: "Explorer", d: "Decode the live on-chain trees and transactions.", href: "/explorer" },
-          ].map((c) => (
-            <Link key={c.t} href={c.href} className="group rounded-xl border border-line bg-panel p-5 transition-colors duration-150 hover:border-brand/40">
-              <c.icon className="h-5 w-5 text-brand" aria-hidden />
-              <div className="mt-3 flex items-center gap-1.5 text-sm font-semibold text-fg">{c.t} <ArrowRight className="h-3.5 w-3.5 -translate-x-1 opacity-0 transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100" aria-hidden /></div>
-              <p className="mt-1 text-[13px] leading-relaxed text-muted">{c.d}</p>
-            </Link>
-          ))}
+        <h2 className="display text-center text-2xl font-semibold tracking-tight">Explore &amp; verify</h2>
+        <div className="mx-auto mt-8 grid max-w-3xl gap-4 sm:grid-cols-2">
+          <Link href="/explorer" className="group rounded-xl border border-line bg-panel p-5 transition-colors duration-150 hover:border-brand/40">
+            <Compass className="h-5 w-5 text-brand" aria-hidden />
+            <div className="mt-3 flex items-center gap-1.5 text-sm font-semibold text-fg">Explorer <ArrowRight className="h-3.5 w-3.5 -translate-x-1 opacity-0 transition-all duration-150 group-hover:translate-x-0 group-hover:opacity-100" aria-hidden /></div>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted">Decode the live market&apos;s on-chain trees and transactions.</p>
+          </Link>
+          <a href={TORNA} target="_blank" rel="noreferrer" className="group rounded-xl border border-line bg-panel p-5 transition-colors duration-150 hover:border-brand/40">
+            <Code2 className="h-5 w-5 text-brand" aria-hidden />
+            <div className="mt-3 text-sm font-semibold text-fg">The Torna engine ↗</div>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted">The parallel on-chain order book TornaLine runs on — docs, SDKs, and the benchmark.</p>
+          </a>
         </div>
         <div className="mt-10 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted">
-          <a href={GH} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 hover:text-brand"><GithubIcon className="h-4 w-4" /> GitHub</a>
-          <a href="https://www.npmjs.com/package/torna-sdk" target="_blank" rel="noreferrer" className="hover:text-brand">torna-sdk on npm</a>
-          <a href="https://crates.io/crates/torna-sdk" target="_blank" rel="noreferrer" className="hover:text-brand">torna-sdk on crates.io</a>
-          <code className="nums rounded border border-line bg-panel px-2.5 py-1 text-xs text-muted">npm i torna-sdk</code>
+          <a href={GH} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 hover:text-brand"><GithubIcon className="h-4 w-4" /> Repo</a>
+          <Link href="/trade" className="hover:text-brand">Open the live market</Link>
         </div>
       </section>
     </>
