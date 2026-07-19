@@ -38,7 +38,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
         <WalletProviders>
           <Nav fanMode={fanMode} />
           <main className="flex-1">{children}</main>
-          <Footer />
+          <Footer fanMode={fanMode} />
         </WalletProviders>
         <Analytics />
       </body>
