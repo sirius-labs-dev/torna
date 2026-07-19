@@ -9,7 +9,7 @@ import { placePick } from "@/lib/fan-actions";
 import { FAN, STAT_LABEL } from "@/lib/fan";
 
 interface Row { player: string; score: number; streak: number }
-interface Round { roundId: number; statKey: number; prevValue: number; lastOutcome: "higher" | "lower" | null; lastRound?: number; lastTx?: string | null }
+interface Round { roundId: number; statKey: number; prevValue: number; lastOutcome: "higher" | "lower" | null; lastRound?: number; lastTx?: string | null; pickedBy?: string[] }
 
 const short = (s: string) => `${s.slice(0, 4)}…${s.slice(-4)}`;
 
@@ -36,9 +36,10 @@ export function FanGame() {
 
   const meKey = FAN.players[me]?.pubkey;
   const myRow = board.find((b) => b.player === meKey);
+  const alreadyPicked = !!(meKey && round?.pickedBy?.includes(meKey));
 
   const tap = async (dir: 0 | 1) => {
-    if (busy !== null || !round) return;
+    if (busy !== null || !round || alreadyPicked) return;
     setBusy(dir);
     setMsg(dir ? "calling HIGHER…" : "calling LOWER…");
     try {
@@ -46,7 +47,10 @@ export function FanGame() {
       setMsg(`locked in ${dir ? "HIGHER" : "LOWER"} for round ${round.roundId}`);
       load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message.slice(0, 120) : String(e));
+      const raw = e instanceof Error ? e.message : String(e);
+      // a repeat call reverts as custom program error 0x0 ("already picked") — show the real state
+      setMsg(/0x0|already/i.test(raw) ? `you already called round ${round.roundId} — waiting for the next update` : raw.slice(0, 120));
+      load();
     } finally {
       setBusy(null);
     }
@@ -62,11 +66,11 @@ export function FanGame() {
         </h2>
         <p className="mt-1 text-sm text-muted">Currently {round?.prevValue ?? "—"}. Call it, build a streak, climb the board.</p>
         <div className="mt-5 grid grid-cols-2 gap-3">
-          <button onClick={() => tap(1)} disabled={busy !== null}
+          <button onClick={() => tap(1)} disabled={busy !== null || alreadyPicked}
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-bid/50 bg-bid/10 py-5 text-lg font-semibold text-bid transition-colors duration-100 hover:bg-bid/20 active:translate-y-px disabled:opacity-40">
             <ArrowUp className="h-6 w-6" aria-hidden /> {busy === 1 ? "…" : "Higher"}
           </button>
-          <button onClick={() => tap(0)} disabled={busy !== null}
+          <button onClick={() => tap(0)} disabled={busy !== null || alreadyPicked}
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-ask/50 bg-ask/10 py-5 text-lg font-semibold text-ask transition-colors duration-100 hover:bg-ask/20 active:translate-y-px disabled:opacity-40">
             <ArrowDown className="h-6 w-6" aria-hidden /> {busy === 0 ? "…" : "Lower"}
           </button>
@@ -81,7 +85,9 @@ export function FanGame() {
             </button>
           ))}
         </div>
-        {msg && <p className="mt-3 text-xs text-muted" role="status" aria-live="polite">{msg}</p>}
+        {alreadyPicked
+          ? <p className="mt-3 text-xs text-bid" role="status" aria-live="polite">✓ You called round {round?.roundId} — waiting for the next update.</p>
+          : msg && <p className="mt-3 text-xs text-muted" role="status" aria-live="polite">{msg}</p>}
       </div>
 
       {/* live leaderboard */}

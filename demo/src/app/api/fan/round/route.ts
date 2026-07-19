@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import { Connection, PublicKey } from "@solana/web3.js";
 import fan from "@/lib/fan.json";
+import { pickPda } from "@/lib/orderbook";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,9 +28,20 @@ export async function GET() {
       const sigs = await conn.getSignaturesForAddress(new PublicKey(fan.game), { limit: 1 }, "confirmed");
       lastTx = sigs[0]?.signature ?? null;
     } catch { /* receipt is best-effort */ }
+    // which demo players have already called THIS open round — so the UI can disable their buttons
+    // instead of firing a tx that reverts ("already picked" -> custom program error 0x0).
+    let pickedBy: string[] = [];
+    try {
+      const program = new PublicKey(fan.program);
+      const gid = BigInt(fan.gameId);
+      const players: string[] = fan.players.map((p: { pubkey: string }) => p.pubkey);
+      const pdas = players.map((pk) => pickPda(program, gid, roundId, new PublicKey(pk))[0]);
+      const infos = await conn.getMultipleAccountsInfo(pdas, "confirmed");
+      pickedBy = players.filter((_, i) => infos[i] !== null);
+    } catch { /* pick gating is best-effort */ }
     return NextResponse.json({
       gameId: fan.gameId, fixtureId: fan.fixtureId, statKey: fan.statKey,
-      roundId, prevValue, lastRound, lastOutcome: outcome === 2 ? null : outcome === 1 ? "higher" : "lower", lastTx,
+      roundId, prevValue, lastRound, lastOutcome: outcome === 2 ? null : outcome === 1 ? "higher" : "lower", lastTx, pickedBy,
     }, { headers: { "cache-control": "no-store" } });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });
