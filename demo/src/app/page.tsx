@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, BarChart3, Code2, Compass, FileText } from "lucide-react";
 import { GithubIcon } from "@/components/ui/GithubIcon";
 import { LiveMarket } from "@/components/LiveMarket";
+import { Parallelism } from "@/components/Parallelism";
 
 const GH = "https://github.com/nzengi/torna";
 
@@ -83,6 +84,9 @@ export default function Home() {
           <div className="mt-8 lg:mt-0"><LiveMarket /></div>
         </div>
       </section>
+
+      {/* The moat: why the order book runs in parallel (the goal-moment burst) */}
+      <Parallelism />
 
       {/* Explore */}
       <section className="mx-auto max-w-6xl px-6 py-16">
