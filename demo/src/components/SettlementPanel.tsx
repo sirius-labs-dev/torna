@@ -13,6 +13,7 @@ import {
   MARKET, connection, demoKeypair, explorerTx, explorerAddr, marketId, orderbookProgram, prediction, reader,
 } from "@/lib/market";
 import { readResolution, resPda } from "@/lib/orderbook";
+import { ImpliedOdds } from "./ImpliedOdds";
 
 interface LiveScore { scoreSoccer?: { p1: number; p2: number }; score?: { p1: number; p2: number }; gameState?: string; action?: string }
 const p1p2 = (s: LiveScore | null): [number, number] | null => {
@@ -92,6 +93,9 @@ export function SettlementPanel() {
         </div>
         <span className={`ml-auto rounded-md border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${badge.cls}`}>{badge.text}</span>
       </div>
+
+      {/* implied probability: the market price vs TxLINE's consensus odds */}
+      <ImpliedOdds fixtureId={fixtureId} home={pred.home ?? "the home team"} />
 
       {/* acting identity (compact) */}
       <div className="mt-4 flex flex-wrap items-center gap-2">

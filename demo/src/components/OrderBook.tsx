@@ -3,6 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import type { Order } from "@/lib/useBook";
+import { MARKET } from "@/lib/market";
+
+// In a prediction market the price IS the implied probability (0–100), so render it as a percent.
+const PCT = !!MARKET.prediction;
+const px = (v: bigint | undefined) => (v === undefined ? "-" : PCT ? `${v.toString()}%` : v.toString());
 
 // On the dark theme the book inherits the neon tokens: bid = neon green, ask = neon pink.
 function Row({ o, side, max, mine }: { o: Order; side: "ask" | "bid"; max: bigint; mine: boolean }) {
@@ -16,7 +21,7 @@ function Row({ o, side, max, mine }: { o: Order; side: "ask" | "bid"; max: bigin
       </div>
       <span className={`nums relative ${color}`}>
         {mine && <span className="mr-1 text-parallel" aria-label="your order">●</span>}
-        {o.price.toString()}
+        {px(o.price)}
       </span>
       <span className="nums relative text-right text-fg">{o.size.toString()}</span>
       <span className="nums relative text-right text-faint">{o.maker.slice(0, 4)}</span>
@@ -77,7 +82,7 @@ export function OrderBook({
         </span>
       </div>
       <div className="grid grid-cols-3 px-4 py-1.5 text-[11px] uppercase tracking-wide text-faint">
-        <span>price</span>
+        <span>{PCT ? "chance" : "price"}</span>
         <span className="text-right">size</span>
         <span className="text-right">maker</span>
       </div>
@@ -102,11 +107,11 @@ export function OrderBook({
           </div>
 
           <div className="flex items-center justify-between border-y border-line bg-panel-hi px-4 py-2.5 text-sm">
-            <span className={`nums font-medium text-bid ${bidFlash}`}>{bestBid?.toString() ?? "-"}</span>
+            <span className={`nums font-medium text-bid ${bidFlash}`}>{px(bestBid)}</span>
             <span className="text-xs text-faint">
-              spread {spread !== undefined ? <span className="nums text-muted">{spread.toString()}</span> : "-"}
+              spread {spread !== undefined ? <span className="nums text-muted">{px(spread)}</span> : "-"}
             </span>
-            <span className={`nums font-medium text-ask ${askFlash}`}>{bestAsk?.toString() ?? "-"}</span>
+            <span className={`nums font-medium text-ask ${askFlash}`}>{px(bestAsk)}</span>
           </div>
 
           <div>
