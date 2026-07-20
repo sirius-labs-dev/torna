@@ -27,6 +27,22 @@ export interface Market {
   book: string;
   cfg: string;
   demos: DemoIdentity[];
+  // prediction-market extension (present only for markets brought up by bringup-prediction.ts):
+  // base == YES share, plus a NO mint, the TxLINE fixture this market settles on, the per-share
+  // payout, the txoracle program, a human label for the YES outcome, and the stat keys (leg order)
+  // to request the settlement proof for. The predicate itself lives on-chain in the res PDA.
+  prediction?: {
+    noMint: string;
+    fixtureId: string;
+    oracleProgram: string;
+    payout: string;
+    label: string;
+    statKeys: number[];
+    home?: string;
+    away?: string;
+    competition?: string;
+    resolveTx?: string;
+  };
 }
 
 export const MARKET = marketJson as Market;
@@ -58,6 +74,13 @@ export const bidTree = (): Tree => new Tree(tornaProgram(), new PublicKey(MARKET
 
 export const demoKeypair = (i: number): Keypair =>
   Keypair.fromSecretKey(Uint8Array.from(MARKET.demos[i].secret));
+
+/** The prediction-market config, or throws if this market is a plain CLOB (no settlement layer). */
+export const prediction = () => {
+  if (!MARKET.prediction) throw new Error("this market has no prediction/settlement layer (run bringup-prediction.ts)");
+  return MARKET.prediction;
+};
+export const isPredictionMarket = (): boolean => !!MARKET.prediction;
 
 const short = (s: string): string => `${s.slice(0, 4)}…${s.slice(-4)}`;
 export const shorten = short;

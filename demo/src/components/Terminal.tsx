@@ -13,6 +13,13 @@ import { ASK, BID, type Side } from "@/lib/orderbook";
 import { cancel, keypairActor, walletActor, requestFaucet, type Actor } from "@/lib/actions";
 import { useBook } from "@/lib/useBook";
 import { connection, demoKeypair, explorerTx, MARKET, reader, shorten } from "@/lib/market";
+
+// prediction-market labels for the shared terminal (base=YES share, quote=USDC)
+const PRED = MARKET.prediction;
+const PAIR_LABEL = PRED ? `${PRED.home ?? "Home"} to win` : "BASE / QUOTE";
+const PAIR_NOTE = PRED ? "price = implied probability, 0–100" : "raw integer prices and sizes";
+const BASE_LABEL = PRED ? "YES" : "Base";
+const QUOTE_LABEL = PRED ? "USDC" : "Quote";
 import { OrderBook } from "./OrderBook";
 import { Trade } from "./Trade";
 import { RecentTrades } from "./RecentTrades";
@@ -111,9 +118,9 @@ export function Terminal() {
       {/* market header */}
       <div className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl border border-line bg-panel px-5 py-3.5">
         <div className="flex items-baseline gap-2">
-          <span className="text-base font-semibold tracking-tight">BASE / QUOTE</span>
+          <span className="text-base font-semibold tracking-tight">{PAIR_LABEL}</span>
           <span className="rounded bg-panel-hi px-1.5 py-0.5 text-[11px] uppercase tracking-wide text-faint">devnet</span>
-          <span className="hidden text-[11px] text-faint sm:inline">raw integer prices and sizes</span>
+          <span className="hidden text-[11px] text-faint sm:inline">{PAIR_NOTE}</span>
         </div>
         <Quote label="Best bid" value={bestBid} cls="text-bid" />
         <Quote label="Mid" value={mid} cls="text-fg" />
@@ -191,8 +198,8 @@ export function Terminal() {
           <div>
             <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-faint">Balances {useWalletAct ? "(your wallet)" : `(Trader ${idIdx + 1})`}</div>
             <div className="flex gap-2">
-              <BalCard label="Base" value={bal ? bal.base.toLocaleString() : "-"} />
-              <BalCard label="Quote" value={bal ? bal.quote.toLocaleString() : "-"} />
+              <BalCard label={BASE_LABEL} value={bal ? bal.base.toLocaleString() : "-"} />
+              <BalCard label={QUOTE_LABEL} value={bal ? bal.quote.toLocaleString() : "-"} />
               <BalCard label="SOL" value={bal ? bal.sol.toFixed(3) : "-"} />
             </div>
           </div>

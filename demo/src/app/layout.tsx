@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Nav } from "@/components/Nav";
@@ -10,13 +11,17 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://torna.vercel.app"),
-  title: "Torna, a parallel ordered on-chain index for Solana",
+  metadataBase: new URL("https://tornaline.vercel.app"),
+  title: "TornaLine — on-chain prediction markets, settled on TxLINE proofs",
   description:
-    "Torna is a parallel, ordered, on-chain index primitive for Solana: a sorted B+ tree where every node is its own account, so writes to different leaves run in the same slot. Build order books, queues, leaderboards, and governance on it. TornaDEX is the live reference order book.",
+    "TornaLine is an on-chain prediction market for live World Cup football. Trade outcome shares on a parallel order book; when the match ends, anyone settles the market trustlessly — TxLINE's oracle verifies a Merkle proof of the result on-chain, with no admin. Built on Torna.",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // tornafan.vercel.app internally rewrites / -> /fan, so the URL stays "/"; detect the fan product
+  // by host here (server-side) and brand the shared nav accordingly — no client flash.
+  const host = (await headers()).get("host") ?? "";
+  const fanMode = host.startsWith("tornafan");
   return (
     <html
       lang="en"
@@ -31,9 +36,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       </head>
       <body className="flex min-h-full flex-col">
         <WalletProviders>
-          <Nav />
+          <Nav fanMode={fanMode} />
           <main className="flex-1">{children}</main>
-          <Footer />
+          <Footer fanMode={fanMode} />
         </WalletProviders>
         <Analytics />
       </body>

@@ -1541,6 +1541,7 @@ dependencies = [
 name = "torna-orderbook"
 version = "0.1.0"
 dependencies = [
+ "borsh",
  "solana-program",
  "torna-cpi",
 ]

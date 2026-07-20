@@ -20,6 +20,11 @@ const CANCEL = 1;
 const MATCH = 2;
 const PLACE_COLD = 3;
 const INIT_MARKET = 4;
+// prediction-market settlement discriminators (mirror orderbook/src/lib.rs)
+const RESOLVE = 5;
+const REDEEM = 6;
+const INIT_OUTCOME = 7;
+const MINT_SET = 8;
 // torna engine discriminator used at setup
 const TRANSFER_AUTHORITY = 11;
 
@@ -36,6 +41,11 @@ const KEY_SIZE = 32;
 function u64le(v: bigint): Uint8Array {
   const b = new Uint8Array(8);
   new DataView(b.buffer).setBigUint64(0, v, true);
+  return b;
+}
+function u16le(v: number): Uint8Array {
+  const b = new Uint8Array(2);
+  new DataView(b.buffer).setUint16(0, v, true);
   return b;
 }
 function concat(parts: Uint8Array[]): Buffer {
@@ -63,6 +73,14 @@ export function bookPda(orderbook: PublicKey, marketId: bigint): [PublicKey, num
 }
 export function cfgPda(orderbook: PublicKey, marketId: bigint): [PublicKey, number] {
   return PublicKey.findProgramAddressSync([Buffer.from("mkt"), u64le(marketId)], orderbook);
+}
+/** Resolution PDA [b"res", market_id] — the prediction-market half of a market. */
+export function resPda(orderbook: PublicKey, marketId: bigint): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([Buffer.from("res"), u64le(marketId)], orderbook);
+}
+/** TxLINE daily_scores_roots PDA [b"daily_scores_roots", epochDay u16 LE] under the TxLINE program. */
+export function scoresRootPda(txlineProgram: PublicKey, epochDay: number): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([Buffer.from("daily_scores_roots"), u16le(epochDay)], txlineProgram);
 }
 
 /** Order value (40B): maker(32) | size_be(8). The SDK is value-agnostic; this is CLOB-specific. */
@@ -282,4 +300,283 @@ async function firstKeyOfLeaf(reader: AccountReader, tree: Tree, leafIdx: bigint
   const cnt = rdU16(d, N_KEY_COUNT);
   if (cnt === 0) return null;
   return d.slice(NODE_HDR, NODE_HDR + KEY_SIZE);
+}
+
+// ============================================================================================
+// Prediction-market settlement instructions (mirror the settlement section of orderbook/src/lib.rs)
+// ============================================================================================
+
+// TxLINE txoracle (devnet) — owns daily_scores_roots and exposes validate_stat_v3.
+export const TXORACLE_DEVNET = new PublicKey("6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J");
+const MS_PER_DAY = 86_400_000;
+
+// A settlement predicate over 1-2 TxLINE stat legs. statKey = period*1000 + base (base 1/2 goals,
+// 3/4 yellows, 5/6 reds, 7/8 corners); ScoreStat period 100 = game_finalised. op/cmp match the
+// on-chain enums: op 0=Add 1=Subtract; cmp 0=GreaterThan 1=LessThan 2=EqualTo.
+export interface PredicateSpec {
+  leg0Key: number; leg0Period: number; leg1Key: number; leg1Period: number;
+  op: number; cmp: number; threshold: number; nLegs: 1 | 2;
+}
+/** YES = home win: (goals_p1 - goals_p2) > 0, both at full-time (period 100). */
+export const homeWin = (): PredicateSpec => ({ leg0Key: 1, leg0Period: 100, leg1Key: 2, leg1Period: 100, op: 1, cmp: 0, threshold: 0, nLegs: 2 });
+/** YES = over `line` total goals: (goals_p1 + goals_p2) > floor(line). */
+export const overGoals = (line: number): PredicateSpec => ({ leg0Key: 1, leg0Period: 100, leg1Key: 2, leg1Period: 100, op: 0, cmp: 0, threshold: Math.floor(line), nLegs: 2 });
+
+const i32le = (v: number): Uint8Array => { const b = new Uint8Array(4); new DataView(b.buffer).setInt32(0, v, true); return b; };
+const u32le = (v: number): Uint8Array => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, v, true); return b; };
+const i64le = (v: bigint): Uint8Array => { const b = new Uint8Array(8); new DataView(b.buffer).setBigInt64(0, v, true); return b; };
+
+// ---- borsh writer for the validate_stat_v3 payload (StatValidationInputV3) ----
+// Minimal, matches the on-chain wire types. Binary API fields are base64 (OpenAPI format:binary).
+const b64 = (s: string): Uint8Array => Uint8Array.from(Buffer.from(s, "base64"));
+const to32 = (v: string | number[] | Uint8Array): Uint8Array => {
+  const a = typeof v === "string" ? b64(v) : Uint8Array.from(v as number[]);
+  if (a.length !== 32) throw new Error(`expected 32-byte hash, got ${a.length}`);
+  return a;
+};
+interface RawProofNode { hash: string | number[]; isRightSibling: boolean }
+const encNodes = (nodes: RawProofNode[] | undefined): Uint8Array => {
+  const list = nodes ?? [];
+  return concat([u32le(list.length), ...list.map((n) => concat([to32(n.hash), Uint8Array.of(n.isRightSibling ? 1 : 0)]))]);
+};
+const encStat = (s: { key: number; value: number; period: number }): Uint8Array => concat([u32le(s.key), i32le(s.value), i32le(s.period)]);
+
+/** Shape a raw stat-validation-v3 response into the borsh StatValidationInputV3 the CPI expects. */
+export function buildValidateStatPayload(val: {
+  ts?: number; summary: { fixtureId: number; updateStats: { updateCount: number; minTimestamp: number; maxTimestamp: number }; eventStatsSubTreeRoot: string };
+  subTreeProof?: RawProofNode[]; mainTreeProof?: RawProofNode[]; eventStatRoot: string;
+  statsToProve: { stat: { key: number; value: number; period: number }; statProof?: RawProofNode[] }[];
+  multiproof: { hashes?: RawProofNode[]; indices: number[] };
+}): { payload: Uint8Array; epochDay: number; tsMs: number } {
+  const tsMs = val.summary.updateStats.minTimestamp;
+  const us = val.summary.updateStats;
+  const payload = concat([
+    i64le(BigInt(tsMs)),                                              // ts
+    i64le(BigInt(val.summary.fixtureId)),                            // fixture_summary.fixture_id
+    i32le(us.updateCount), i64le(BigInt(us.minTimestamp)), i64le(BigInt(us.maxTimestamp)), // update_stats
+    to32(val.summary.eventStatsSubTreeRoot),                         // events_sub_tree_root
+    encNodes(val.subTreeProof),                                       // fixture_proof
+    encNodes(val.mainTreeProof),                                      // main_tree_proof
+    to32(val.eventStatRoot),                                          // event_stat_root
+    u32le(val.statsToProve.length),                                  // leaves (Vec)
+    ...val.statsToProve.map((l) => concat([encStat(l.stat), encNodes(l.statProof)])),
+    encNodes(val.multiproof.hashes),                                 // multiproof_hashes
+    concat([u32le(val.multiproof.indices.length), ...val.multiproof.indices.map(u32le)]), // leaf_indices
+  ]);
+  return { payload, epochDay: Math.floor(tsMs / MS_PER_DAY), tsMs };
+}
+
+/** InitOutcome (disc 7): bind the settlement predicate + NO mint + payout + txoracle to a market.
+ *  The book PDA must already be the mint authority of both YES(base) and NO. */
+export function initOutcomeIx(args: {
+  orderbook: PublicKey; marketId: bigint; authority: PublicKey;
+  baseMint: PublicKey; noMint: PublicKey; oracleProgram: PublicKey;
+  predicate: PredicateSpec; payout: bigint; rent: bigint;
+}): TransactionInstruction {
+  const [cfg] = cfgPda(args.orderbook, args.marketId);
+  const [book] = bookPda(args.orderbook, args.marketId);
+  const [res, resBump] = resPda(args.orderbook, args.marketId);
+  const p = args.predicate;
+  const data = concat([
+    Uint8Array.of(INIT_OUTCOME), u64le(args.marketId), Uint8Array.of(resBump),
+    u32le(p.leg0Key), i32le(p.leg0Period), u32le(p.leg1Key), i32le(p.leg1Period),
+    Uint8Array.of(p.op), Uint8Array.of(p.cmp), i32le(p.threshold), Uint8Array.of(p.nLegs),
+    u64le(args.payout), u64le(args.rent), args.oracleProgram.toBytes(),
+  ]);
+  return new TransactionInstruction({
+    programId: args.orderbook,
+    data,
+    keys: [
+      m(args.authority, true, true), m(res, false, true), m(cfg, false, false),
+      m(args.baseMint, false, false), m(args.noMint, false, false), m(book, false, false),
+      m(SystemProgram.programId, false, false),
+    ],
+  });
+}
+
+/** MintSet (disc 8): deposit `amount * payout` quote collateral, receive `amount` YES + `amount` NO.
+ *  This funds redemptions — without an outstanding complete set there is nothing solvent to redeem. */
+export function mintSetIx(args: {
+  orderbook: PublicKey; marketId: bigint; user: PublicKey; amount: bigint;
+  baseMint: PublicKey; noMint: PublicKey; quoteMint: PublicKey; quoteVault: PublicKey;
+}): TransactionInstruction {
+  const [book, bump] = bookPda(args.orderbook, args.marketId);
+  const [cfg] = cfgPda(args.orderbook, args.marketId);
+  const [res] = resPda(args.orderbook, args.marketId);
+  const userQuote = getAssociatedTokenAddressSync(args.quoteMint, args.user, true);
+  const userYes = getAssociatedTokenAddressSync(args.baseMint, args.user, true);
+  const userNo = getAssociatedTokenAddressSync(args.noMint, args.user, true);
+  const data = concat([Uint8Array.of(MINT_SET), u64le(args.marketId), Uint8Array.of(bump), u64le(args.amount)]);
+  return new TransactionInstruction({
+    programId: args.orderbook,
+    data,
+    keys: [
+      m(args.user, true, true), m(book, false, false), m(cfg, false, false), m(res, false, false),
+      m(userQuote, false, true), m(args.quoteVault, false, true),
+      m(args.baseMint, false, true), m(args.noMint, false, true),
+      m(userYes, false, true), m(userNo, false, true), m(TOKEN_PROGRAM, false, false),
+    ],
+  });
+}
+
+/** Resolve (disc 5): CPI txoracle validate_stat_v3 with the caller's proof `payload` + the market's
+ *  stored predicate, then stamp the winning side. Trustless — the oracle checks the multiproof
+ *  against its own published root. `payload`/`epochDay` come from buildValidateStatPayload().
+ *  NOTE: validate_stat_v3 is compute-heavy (~1.4M CU) — prepend a ComputeBudget limit ix. */
+export function resolveIx(args: {
+  orderbook: PublicKey; marketId: bigint; caller: PublicKey; oracleProgram: PublicKey;
+  payload: Uint8Array; epochDay: number;
+}): TransactionInstruction {
+  const [cfg] = cfgPda(args.orderbook, args.marketId);
+  const [res] = resPda(args.orderbook, args.marketId);
+  const [roots] = scoresRootPda(args.oracleProgram, args.epochDay);
+  const data = concat([Uint8Array.of(RESOLVE), u64le(args.marketId), args.payload]);
+  return new TransactionInstruction({
+    programId: args.orderbook,
+    data,
+    keys: [
+      m(args.caller, true, true), m(res, false, true), m(cfg, false, false),
+      m(args.oracleProgram, false, false), m(roots, false, false),
+    ],
+  });
+}
+
+/** Redeem (disc 6): after Resolve, burn `amount` of the winning-side mint and collect
+ *  `amount * payout` quote from the vault. Losing-side shares have no redemption path.
+ *  `winningMint` is base (YES) if YES won, else the NO mint — read from the res account first. */
+export function redeemIx(args: {
+  orderbook: PublicKey; marketId: bigint; holder: PublicKey; amount: bigint;
+  winningMint: PublicKey; quoteMint: PublicKey; quoteVault: PublicKey;
+}): TransactionInstruction {
+  const [book, bump] = bookPda(args.orderbook, args.marketId);
+  const [cfg] = cfgPda(args.orderbook, args.marketId);
+  const [res] = resPda(args.orderbook, args.marketId);
+  const holderWin = getAssociatedTokenAddressSync(args.winningMint, args.holder, true);
+  const holderQuote = getAssociatedTokenAddressSync(args.quoteMint, args.holder, true);
+  const data = concat([Uint8Array.of(REDEEM), u64le(args.marketId), Uint8Array.of(bump), u64le(args.amount)]);
+  return new TransactionInstruction({
+    programId: args.orderbook,
+    data,
+    keys: [
+      m(args.holder, true, true), m(book, false, false), m(cfg, false, false), m(res, false, true),
+      m(args.winningMint, false, true), m(holderWin, false, true),
+      m(args.quoteVault, false, true), m(holderQuote, false, true), m(TOKEN_PROGRAM, false, false),
+    ],
+  });
+}
+
+/** Read a resolution PDA's settled state (winning side + proven leg values), or null if
+ *  unresolved/absent. Lets a REDEEM caller pick the winning mint. Offsets mirror R_* in lib.rs. */
+export async function readResolution(
+  reader: AccountReader, orderbook: PublicKey, marketId: bigint,
+): Promise<{ resolved: boolean; yesWon: boolean; val0: number; val1: number } | null> {
+  const [res] = resPda(orderbook, marketId);
+  const d = await reader.accountData(res);
+  if (!d || d.length < 110) return null;
+  const dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
+  const R_RESOLVED = 100, R_WINNING = 101, R_VAL0 = 102, R_VAL1 = 106;
+  return { resolved: d[R_RESOLVED] === 1, yesWon: d[R_WINNING] === 1, val0: dv.getInt32(R_VAL0, true), val1: dv.getInt32(R_VAL1, true) };
+}
+
+// ============================================================================================
+// TornaFan — Hi-Lo pick'em ix builders (mirror the pickem section of orderbook/src/lib.rs)
+// ============================================================================================
+
+const INIT_GAME = 9, PLACE_PICK = 10, RESOLVE_ROUND = 11, SCORE_ONE = 12, INIT_PLAYER = 13;
+
+export function gamePda(program: PublicKey, gameId: bigint): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([Buffer.from("game"), u64le(gameId)], program);
+}
+export function lbPda(program: PublicKey, gameId: bigint): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([Buffer.from("lb"), u64le(gameId)], program);
+}
+export function playerPda(program: PublicKey, gameId: bigint, player: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([Buffer.from("pl"), u64le(gameId), player.toBytes()], program);
+}
+export function pickPda(program: PublicKey, gameId: bigint, roundId: number, player: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync([Buffer.from("pk"), u64le(gameId), u32le(roundId), player.toBytes()], program);
+}
+
+/** InitGame (disc 9): create the game config + bind its leaderboard tree (authority = lb PDA). */
+export function initGameIx(args: {
+  program: PublicKey; gameId: bigint; authority: PublicKey; torna: PublicKey; lbHeader: PublicKey;
+  oracleProgram: PublicKey; fixtureId: bigint; statKey: number; statPeriod: number; roundId: number; prevValue: number; rent: bigint;
+}): TransactionInstruction {
+  const [game] = gamePda(args.program, args.gameId);
+  const [lb] = lbPda(args.program, args.gameId);
+  const data = concat([
+    Uint8Array.of(INIT_GAME), u64le(args.gameId), u64le(args.fixtureId), u32le(args.statKey), i32le(args.statPeriod),
+    u32le(args.roundId), i32le(args.prevValue), args.oracleProgram.toBytes(), u64le(args.rent),
+  ]);
+  return new TransactionInstruction({
+    programId: args.program, data,
+    keys: [m(args.authority, true, true), m(game, false, true), m(lb, false, false), m(args.torna, false, false), m(args.lbHeader, false, false), m(SystemProgram.programId, false, false)],
+  });
+}
+
+/** InitPlayer (disc 13): create a player's score/streak PDA once. */
+export function initPlayerIx(args: { program: PublicKey; gameId: bigint; payer: PublicKey; player: PublicKey; rent: bigint }): TransactionInstruction {
+  const [pl, bump] = playerPda(args.program, args.gameId, args.player);
+  const [game] = gamePda(args.program, args.gameId);
+  const data = concat([Uint8Array.of(INIT_PLAYER), u64le(args.gameId), args.player.toBytes(), Uint8Array.of(bump), u64le(args.rent)]);
+  return new TransactionInstruction({
+    programId: args.program, data,
+    keys: [m(args.payer, true, true), m(pl, false, true), m(game, false, false), m(SystemProgram.programId, false, false)],
+  });
+}
+
+/** PlacePick (disc 10): a player calls Higher(1)/Lower(0) for the current round. */
+export function placePickIx(args: { program: PublicKey; gameId: bigint; roundId: number; player: PublicKey; dir: 0 | 1; rent: bigint }): TransactionInstruction {
+  const [game] = gamePda(args.program, args.gameId);
+  const [pick, bump] = pickPda(args.program, args.gameId, args.roundId, args.player);
+  const data = concat([Uint8Array.of(PLACE_PICK), u64le(args.gameId), u32le(args.roundId), Uint8Array.of(args.dir), Uint8Array.of(bump), u64le(args.rent)]);
+  return new TransactionInstruction({
+    programId: args.program, data,
+    keys: [m(args.player, true, true), m(game, false, false), m(pick, false, true), m(SystemProgram.programId, false, false)],
+  });
+}
+
+/** ResolveRound (disc 11): verify the round's stat via the TxLINE proof + stamp Higher/Lower. */
+export function resolveRoundIx(args: { program: PublicKey; gameId: bigint; caller: PublicKey; oracleProgram: PublicKey; payload: Uint8Array; epochDay: number }): TransactionInstruction {
+  const [game] = gamePda(args.program, args.gameId);
+  const [roots] = scoresRootPda(args.oracleProgram, args.epochDay);
+  const data = concat([Uint8Array.of(RESOLVE_ROUND), u64le(args.gameId), args.payload]);
+  return new TransactionInstruction({
+    programId: args.program, data,
+    keys: [m(args.caller, true, true), m(game, false, true), m(args.oracleProgram, false, false), m(roots, false, false)],
+  });
+}
+
+/** ScoreOne (disc 12): score one player + mirror to the leaderboard. `caller` signs (a keeper, or
+ *  the player themselves); `player` identifies the PDAs. `path` = the leaf accounts for key=player.
+ *  Parallel across players (different leaves). Mirrors score_one accounts:
+ *  [caller(s), game, player_pda(w), pick, lb, torna, lb_header, path...]. */
+export async function scoreOneIx(args: {
+  reader: AccountReader; program: PublicKey; gameId: bigint; roundId: number; caller: PublicKey; player: PublicKey; torna: PublicKey; lbTree: Tree;
+}): Promise<TransactionInstruction> {
+  const [game] = gamePda(args.program, args.gameId);
+  const [lb, lbBump] = lbPda(args.program, args.gameId);
+  const [pl] = playerPda(args.program, args.gameId, args.player);
+  const [pick] = pickPda(args.program, args.gameId, args.roundId, args.player);
+  const header = args.lbTree.headerPda()[0];
+  const path = await args.lbTree.path(args.reader, args.player.toBytes());
+  if (!path) throw new Error("leaderboard tree not initialized / path unresolved");
+  const data = concat([
+    Uint8Array.of(SCORE_ONE), u64le(args.gameId), u32le(args.roundId), args.player.toBytes(),
+    Uint8Array.of(lbBump), Uint8Array.of(path.length),
+  ]);
+  return new TransactionInstruction({
+    programId: args.program, data,
+    keys: [
+      m(args.caller, true, true), m(game, false, false), m(pl, false, true), m(pick, false, false),
+      m(lb, false, false), m(args.torna, false, false), m(header, false, false),
+      ...path.map((n, i) => m(args.lbTree.nodePda(n)[0], false, i === path.length - 1)),
+    ],
+  });
+}
+
+/** Decode a leaderboard leaf value (40B): score(8 BE) | streak(8 BE). */
+export function decodeLbValue(v: Uint8Array): { score: number; streak: number } {
+  const dv = new DataView(v.buffer, v.byteOffset, v.byteLength);
+  return { score: Number(dv.getBigUint64(0, false)), streak: Number(dv.getBigUint64(8, false)) };
 }
