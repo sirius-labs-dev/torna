@@ -4,7 +4,7 @@ import { GithubIcon } from "@/components/ui/GithubIcon";
 import { LiveMarket } from "@/components/LiveMarket";
 import { Parallelism } from "@/components/Parallelism";
 
-const GH = "https://github.com/sirius-labs-dev/torna";
+const GH = "https://github.com/sirius-labs-dev/tornaline";
 const TORNA = "https://torna.vercel.app";
 
 export default function Home() {
